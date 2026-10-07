@@ -1,0 +1,14 @@
+UTC timestamp: 2026-10-07T12:37:29Z
+1. CPU model: Intel(R) Xeon(R) Processor @ 2.30GHz
+   Architecture: x86_64; OS: Linux 6.18.44-fc-v77
+2. Cores: 4 online; sockets 1; NUMA nodes 1; no pinning applied
+3. Frequency: nominal 2300.000 MHz (cpuinfo); governor unavailable; turbo/DVFS not controlled
+   SMT: 1 thread(s) per core
+4. Compiler: g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+   Flags: -std=c++20 -O2 -DNDEBUG -pthread -Wall -Wextra -Wpedantic -I/tmp/claude-0/before_hdr 
+5. Workload: copy+drop of a shared owner (shared line), per-thread private owners, weak lock+drop
+6. Baseline: std::shared_ptr/std::weak_ptr from the same standard library
+7. Method: steady_clock, slowest thread per sample, discarded warmups, median/min/p90/cv
+Arguments: defaults
+ownership.hpp SHA256: 3b2f0d5b5401afe52ac663641f559451b594c34fd22d0d6e98edec2accf22fa4
+refcount_scaling.cpp SHA256: f18c97209618710beb1aa17da5a620105ac100a51d2808f57dc08734b1491a3b

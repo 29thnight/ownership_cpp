@@ -206,15 +206,25 @@ non-atomic local count. `share()` creates a global owner; `shared.localize()` cr
 a fresh local group. Cancellation and migrating callbacks must not carry local
 owners across threads. Share across the boundary, then localize if needed.
 
+Thread misuse aborts in builds without `NDEBUG` (override with
+`OWN_DEBUG_THREAD_CHECK=0/1`). Translation units may differ in this setting
+without memory-safety consequences; diagnostics are guaranteed only when every
+translation unit enables them.
+
 `local` does not mean an automatically enforced lexical lifetime. `local_owner`
 has actual thread confinement; `local_view` merely borrows a pointer and contains
 no thread ID, owner, or automatic validity check. Borrowed payload access still
 needs appropriate lifetime and synchronization.
 
-The shared/local allocation design is unchanged: `make_shared` coallocates object and
-control block once; `make_local` additionally allocates a local group, for two
-allocations. Every nonempty `localize()` allocates another group. There is no
-embedded-group/coallocation optimization in this revision.
+`make_shared` coallocates object and a compact control block once (a 16-byte
+header, as dense as the standard library's); `make_local` and `allocate_local`
+place their first 40-byte local group in the same block, also one allocation.
+Every further nonempty `localize()` creates a separate group; with the default
+allocator each thread reuses the storage of its most recently freed group, so
+repeated localize/drop cycles do not reach the allocator. A
+payload read on one core while other cores copy its owners shares a cache line
+with the counts; declare such a hot type `alignas(64)` to give it its own line
+([measurements](docs/benchmark_layout.md)).
 
 ## Allocation and deferred retirement
 
@@ -240,6 +250,8 @@ capacity behavior. See [allocation and retirement contracts](docs/design.md).
 make example
 # This target runs the current debug/release tests before comparing unique owners:
 make benchmark-unique
+# Reference-count contention at 1..N threads (QUICK=1 for a smoke test):
+make benchmark-scaling
 ```
 
 Requires an existing C++20 compiler with exceptions and a POSIX shell for the
@@ -254,8 +266,18 @@ compare equivalent retained-owner borrowing against std ownership plus raw/refer
 borrows, and separately measure independent owning copies. Historical data and
 fresh reruns of the previous revision are preserved. A borrowed view is not a
 faster substitute for an independent lifetime guarantee.
+[Contention scaling](docs/benchmark_scaling.md) measures shared-owner copies
+from 1 to N threads against `std::shared_ptr`, with private-object and weak-lock
+controls; the single-instruction increment cut four-thread copy/drop cost by
+about 40% on the measured VM. The [performance review](docs/performance_review.md)
+lists the remaining measured costs and planned improvements, and the
+[optimization round](docs/optimization_round.md) records the latest before/after
+comparison across every harness.
 
-Windows/MSVC, Clang, macOS and other architectures are not yet validated. These
+Clang 18 on Linux x86-64 passes the debug and release suites; the CI workflow
+(`.github/workflows/ci.yml`) also runs every sanitizer mode with GCC and Clang and
+smoke-runs the benchmark harnesses. Windows/MSVC, macOS and other architectures
+are not yet validated. These
 are CPU simulations, not measured engine integration or actual GPU execution.
 
 ## Measured borrowing costs
@@ -293,8 +315,10 @@ If a dependency needs the full standard pointer interface, using that interface
 there can be simpler than expanding this library preemptively.
 
 There is no full `std::unique_ptr` / `std::shared_ptr` parity. Arrays, `void` owners, aliasing ownership,
-atomic handle objects, owner-ordering/hashing, raw adoption, arbitrary payload
-deleters and an STL allocator-traits adapter are omitted. Payload destructors must
+atomic handle objects, owner-to-owner equality, ordering and hashing, raw adoption,
+arbitrary payload deleters and an STL allocator-traits adapter are omitted. Owners
+and views compare only with `nullptr` (`owner == nullptr`, `view != nullptr`);
+weak observers have no null comparison, use `expired()` or `lock()`. Payload destructors must
 be `noexcept`. Strong-reference cycles still need weak links.
 
 MIT; the original [LICENSE](LICENSE) is preserved.

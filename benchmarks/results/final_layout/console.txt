@@ -1,0 +1,37 @@
+SIZE own_block 24 bytes, malloc chunk 32
+SIZE std_block 24 bytes, malloc chunk 32
+case                   impl    median_ns     min_ns     p90_ns      cv
+create_read_destroy    own        16.721     16.126     21.979   0.109
+RESULT create_read_destroy/own 16.721 ns
+scan_16k_objects       own         0.850      0.800      0.932   0.061
+RESULT scan_16k_objects/own 0.850 ns
+scan_256k_objects      own         6.245      5.813      6.755   0.051
+RESULT scan_256k_objects/own 6.245 ns
+reader_with_copiers    own         4.336      1.718      5.390   0.234
+RESULT reader_with_copiers/own 4.336 ns
+create_read_destroy    own_a64     19.007     18.362     20.761   0.064
+RESULT create_read_destroy/own_a64 19.007 ns
+scan_16k_objects       own_a64      1.260      1.102      1.484   0.095
+RESULT scan_16k_objects/own_a64 1.260 ns
+scan_256k_objects      own_a64      9.962      9.075     10.496   0.050
+RESULT scan_256k_objects/own_a64 9.962 ns
+reader_with_copiers    own_a64      0.283      0.262      0.301   0.055
+RESULT reader_with_copiers/own_a64 0.283 ns
+create_read_destroy    std_a      11.454     11.120     11.748   0.026
+RESULT create_read_destroy/std_a 11.454 ns
+scan_16k_objects       std_a       0.859      0.808      1.018   0.158
+RESULT scan_16k_objects/std_a 0.859 ns
+scan_256k_objects      std_a       6.116      5.465      7.054   0.102
+RESULT scan_256k_objects/std_a 6.116 ns
+reader_with_copiers    std_a       2.122      1.478      2.718   0.230
+RESULT reader_with_copiers/std_a 2.122 ns
+create_read_destroy    std_b      11.485     10.867     12.549   0.081
+RESULT create_read_destroy/std_b 11.485 ns
+scan_16k_objects       std_b       0.853      0.811      0.939   0.047
+RESULT scan_16k_objects/std_b 0.853 ns
+scan_256k_objects      std_b       5.968      5.529      6.579   0.111
+RESULT scan_256k_objects/std_b 5.968 ns
+reader_with_copiers    std_b       2.179      1.309      2.359   0.204
+RESULT reader_with_copiers/std_b 2.179 ns
+samples=15 warmups=2 scale=1 copiers=3 pinned=1
+verification: every sample matched its checksum

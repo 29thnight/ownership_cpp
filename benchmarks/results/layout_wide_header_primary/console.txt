@@ -1,0 +1,37 @@
+SIZE own_block 80 bytes, malloc chunk 96
+SIZE std_block 24 bytes, malloc chunk 32
+case                   impl    median_ns     min_ns     p90_ns      cv
+create_read_destroy    own        20.390     20.058     20.769   0.033
+RESULT create_read_destroy/own 20.390 ns
+scan_16k_objects       own         1.226      0.957      1.534   0.147
+RESULT scan_16k_objects/own 1.226 ns
+scan_256k_objects      own         8.730      7.293      9.363   0.103
+RESULT scan_256k_objects/own 8.730 ns
+reader_with_copiers    own         0.283      0.262      0.322   0.076
+RESULT reader_with_copiers/own 0.283 ns
+create_read_destroy    own_a64     23.172     22.577     25.647   0.058
+RESULT create_read_destroy/own_a64 23.172 ns
+scan_16k_objects       own_a64      7.821      6.618      9.208   0.122
+RESULT scan_16k_objects/own_a64 7.821 ns
+scan_256k_objects      own_a64     11.742     10.422     12.866   0.068
+RESULT scan_256k_objects/own_a64 11.742 ns
+reader_with_copiers    own_a64      0.277      0.260      0.323   0.074
+RESULT reader_with_copiers/own_a64 0.277 ns
+create_read_destroy    std_a      11.594     11.337     13.422   0.068
+RESULT create_read_destroy/std_a 11.594 ns
+scan_16k_objects       std_a       0.879      0.833      0.978   0.060
+RESULT scan_16k_objects/std_a 0.879 ns
+scan_256k_objects      std_a       6.676      5.222      6.980   0.105
+RESULT scan_256k_objects/std_a 6.676 ns
+reader_with_copiers    std_a       1.291      0.773      2.016   0.277
+RESULT reader_with_copiers/std_a 1.291 ns
+create_read_destroy    std_b      11.709     11.265     13.181   0.060
+RESULT create_read_destroy/std_b 11.709 ns
+scan_16k_objects       std_b       0.881      0.832      0.982   0.070
+RESULT scan_16k_objects/std_b 0.881 ns
+scan_256k_objects      std_b       6.196      5.541      7.060   0.088
+RESULT scan_256k_objects/std_b 6.196 ns
+reader_with_copiers    std_b       1.436      0.783      1.965   0.324
+RESULT reader_with_copiers/std_b 1.436 ns
+samples=15 warmups=2 scale=1 copiers=3
+verification: every sample matched its checksum

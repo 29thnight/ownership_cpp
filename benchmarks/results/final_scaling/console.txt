@@ -1,0 +1,57 @@
+case               impl        threads  median_ns     min_ns     p90_ns      cv
+shared_copy_drop   std_shared        1      16.55      16.11      18.42   0.054
+RESULT shared_copy_drop/std_shared/1 16.547 ns_per_pair
+private_copy_drop  std_shared        1      16.75      16.25      18.96   0.063
+RESULT private_copy_drop/std_shared/1 16.749 ns_per_pair
+weak_lock_drop     std_shared        1      16.98      16.33      20.49   0.085
+RESULT weak_lock_drop/std_shared/1 16.981 ns_per_pair
+shared_copy_drop   std_shared_b       1      16.67      15.60      18.47   0.080
+RESULT shared_copy_drop/std_shared_b/1 16.670 ns_per_pair
+private_copy_drop  std_shared_b       1      16.59      15.65      18.41   0.054
+RESULT private_copy_drop/std_shared_b/1 16.588 ns_per_pair
+weak_lock_drop     std_shared_b       1      18.70      16.75      20.37   0.073
+RESULT weak_lock_drop/std_shared_b/1 18.698 ns_per_pair
+shared_copy_drop   own_shared        1      13.20      12.87      15.60   0.097
+RESULT shared_copy_drop/own_shared/1 13.197 ns_per_pair
+private_copy_drop  own_shared        1      13.30      12.65      15.66   0.080
+RESULT private_copy_drop/own_shared/1 13.305 ns_per_pair
+weak_lock_drop     own_shared        1      15.05      14.77      16.78   0.056
+RESULT weak_lock_drop/own_shared/1 15.054 ns_per_pair
+shared_copy_drop   std_shared        2     147.54      36.53     168.23   0.222
+RESULT shared_copy_drop/std_shared/2 147.538 ns_per_pair
+private_copy_drop  std_shared        2      17.58      15.62      18.50   0.144
+RESULT private_copy_drop/std_shared/2 17.581 ns_per_pair
+weak_lock_drop     std_shared        2     169.65      69.45     198.23   0.227
+RESULT weak_lock_drop/std_shared/2 169.646 ns_per_pair
+shared_copy_drop   std_shared_b       2     153.94      36.76     189.53   0.289
+RESULT shared_copy_drop/std_shared_b/2 153.943 ns_per_pair
+private_copy_drop  std_shared_b       2      16.64      16.45      18.44   0.069
+RESULT private_copy_drop/std_shared_b/2 16.636 ns_per_pair
+weak_lock_drop     std_shared_b       2     165.19      50.68     224.38   0.331
+RESULT weak_lock_drop/std_shared_b/2 165.195 ns_per_pair
+shared_copy_drop   own_shared        2     104.22      23.19     132.77   0.284
+RESULT shared_copy_drop/own_shared/2 104.223 ns_per_pair
+private_copy_drop  own_shared        2      14.33      13.10      23.22   0.271
+RESULT private_copy_drop/own_shared/2 14.329 ns_per_pair
+weak_lock_drop     own_shared        2     151.57      41.98     199.86   0.368
+RESULT weak_lock_drop/own_shared/2 151.573 ns_per_pair
+shared_copy_drop   std_shared        4     370.49     269.55     395.99   0.117
+RESULT shared_copy_drop/std_shared/4 370.493 ns_per_pair
+private_copy_drop  std_shared        4      16.57      16.36      22.24   0.179
+RESULT private_copy_drop/std_shared/4 16.574 ns_per_pair
+weak_lock_drop     std_shared        4     422.23     331.25     508.46   0.133
+RESULT weak_lock_drop/std_shared/4 422.230 ns_per_pair
+shared_copy_drop   std_shared_b       4     347.95     295.42     411.12   0.121
+RESULT shared_copy_drop/std_shared_b/4 347.951 ns_per_pair
+private_copy_drop  std_shared_b       4      16.68      16.34      36.54   0.351
+RESULT private_copy_drop/std_shared_b/4 16.681 ns_per_pair
+weak_lock_drop     std_shared_b       4     437.86     282.17     469.87   0.167
+RESULT weak_lock_drop/std_shared_b/4 437.857 ns_per_pair
+shared_copy_drop   own_shared        4     249.12     185.75     268.17   0.124
+RESULT shared_copy_drop/own_shared/4 249.123 ns_per_pair
+private_copy_drop  own_shared        4      13.85      13.06      34.20   0.534
+RESULT private_copy_drop/own_shared/4 13.854 ns_per_pair
+weak_lock_drop     own_shared        4     384.36     329.88     445.53   0.106
+RESULT weak_lock_drop/own_shared/4 384.365 ns_per_pair
+samples=15 warmups=2 iterations=200000 pinned=1 thread_counts=1,2,4
+verification: every sample matched its payload checksum and returned the count to one

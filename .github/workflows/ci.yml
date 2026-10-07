@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.compiler }}, ${{ matrix.mode }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        mode: [debug, release, asan, ubsan, tsan]
+    steps:
+      - uses: actions/checkout@v4
+      # Ubuntu 24.04 kernels use more mmap randomness than the sanitizer
+      # runtimes accept; TSan and ASan abort at startup without this.
+      - name: Reduce ASLR entropy for sanitizers
+        if: matrix.mode == 'asan' || matrix.mode == 'tsan'
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - name: Compiler version
+        run: ${{ matrix.compiler }} --version
+      - name: Run test suite
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: ./scripts/test.sh ${{ matrix.mode }}
+
+  benchmarks:
+    name: benchmarks build and smoke run (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile every benchmark harness
+        run: |
+          for source in benchmarks/ownership_bench.cpp benchmarks/unique_bench.cpp benchmarks/refcount_scaling.cpp benchmarks/control_block_layout.cpp benchmarks/allocated_unique_layout.cpp; do
+            ${{ matrix.compiler }} -std=c++20 -O2 -DNDEBUG -pthread -Wall -Wextra -Wpedantic -Werror -Iinclude -c "$source" -o /dev/null
+          done
+      # Timing on shared CI runners is not evidence; this checks that the
+      # harness builds, runs and passes its own per-sample verification.
+      - name: Contention scaling smoke run
+        env:
+          CXX: ${{ matrix.compiler }}
+          QUICK: "1"
+          BENCH_OUTPUT: ${{ runner.temp }}/scaling
+        run: ./scripts/benchmark_scaling.sh --pin 1
+      - name: Control-block layout smoke run
+        env:
+          CXX: ${{ matrix.compiler }}
+          QUICK: "1"
+          BENCH_OUTPUT: ${{ runner.temp }}/layout
+        run: ./scripts/benchmark_layout.sh --pin 1
+      - name: Allocated unique layout smoke run
+        env:
+          CXX: ${{ matrix.compiler }}
+          QUICK: "1"
+          BENCH_OUTPUT: ${{ runner.temp }}/allocated_unique
+        run: ./scripts/benchmark_allocated_unique.sh
+      - name: Examples
+        run: make example CXX=${{ matrix.compiler }}

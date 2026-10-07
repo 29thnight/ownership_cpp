@@ -65,6 +65,14 @@ void operator delete(void* pointer, std::size_t, std::align_val_t alignment) noe
 #undef OWN_TEST_NOINLINE
 
 namespace {
+// A new-expression whose result never escapes may be elided together with its
+// delete ([expr.new]/14); Clang does so at -O3 even for replaced operator new.
+// Publishing the address keeps each allocation that a test counts or fails.
+void* volatile observed_address = nullptr;
+template<class T> void keep_allocation(const own::unique_owner<T>& owner) {
+    observed_address = const_cast<void*>(static_cast<const void*>(&*owner));
+}
+
 struct tracked {
     int* destroyed;
     explicit tracked(int& count) : destroyed(&count) {}
@@ -76,7 +84,10 @@ struct self_tracked : tracked, own::enable_owner_from_this<self_tracked> {
 };
 struct throwing_payload {
     struct member_guard { int* count; ~member_guard() { ++*count; } } member;
-    explicit throwing_payload(int& count) : member{&count} { throw 17; }
+    explicit throwing_payload(int& count) : member{&count} {
+        observed_address = this;
+        throw 17;
+    }
 };
 
 template<class T> void single_allocation_and_failure() {
@@ -93,7 +104,7 @@ template<class T> void single_allocation_and_failure() {
     CHECK(live_allocations == baseline && destroyed == 1);
     bool caught = false;
     fail_after = 0;
-    try { auto failed = own::make_unique<T>(destroyed); (void)failed; }
+    try { auto failed = own::make_unique<T>(destroyed); keep_allocation(failed); }
     catch (const std::bad_alloc&) { caught = true; }
     fail_after = -1;
     CHECK(caught && destroyed == 1 && live_allocations == baseline);

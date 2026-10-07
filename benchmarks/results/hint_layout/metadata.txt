@@ -1,0 +1,14 @@
+UTC timestamp: 2026-10-07T14:26:30Z
+1. CPU model: Intel(R) Xeon(R) Processor @ 2.30GHz
+   Architecture: x86_64; OS: Linux 6.18.44-fc-v77
+2. Cores: 4 online; sockets 1; NUMA nodes 1
+3. Frequency: nominal 2300.000 MHz (cpuinfo); governor unavailable; turbo/DVFS not controlled
+   SMT: 1 thread(s) per core
+4. Compiler: g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+   Flags: -std=c++20 -O2 -DNDEBUG -pthread -Wall -Wextra -Wpedantic -Iinclude 
+5. Workload: make_shared create/read/destroy; shuffled payload reads over 16k and 256k owners; one reader thread beside copier threads on one object
+6. Baseline: std::shared_ptr/std::weak_ptr from the same standard library, same process
+7. Method: steady_clock, discarded warmups, seeded shuffled case order, median/min/p90/cv
+Arguments: --pin 1
+ownership.hpp SHA256: b3979daa1d1b9c290e422531aa4d4c166a00bc9c3864deca0571884550a8b8b5
+control_block_layout.cpp SHA256: e77245c4b104658db93361680b3a1c567a1cb2edbe8e12e27e612350072c1ce6

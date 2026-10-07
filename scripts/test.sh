@@ -24,7 +24,16 @@ run_mode() {
         release) flags+=(-O3 -DNDEBUG) ;;
         asan) flags+=(-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined) ;;
         ubsan) flags+=(-O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=all) ;;
-        tsan) flags+=(-O1 -g -fno-omit-frame-pointer -fsanitize=thread) ;;
+        tsan)
+            flags+=(-O1 -g -fno-omit-frame-pointer -fsanitize=thread)
+            # Clang links its TSan runtime statically by default, and that
+            # archive defines operator new/delete, so the tests that replace
+            # the global allocation functions fail to link with duplicate
+            # symbols. The shared runtime lets the test's definitions win.
+            if "$cxx" --version 2>/dev/null | grep -qi clang; then
+                flags+=(-shared-libsan -Wl,-rpath,"$("$cxx" -print-runtime-dir)")
+            fi
+            ;;
         *) echo "Unknown test mode: $selected" >&2; return 2 ;;
     esac
     if [[ -n "${CXXFLAGS:-}" ]]; then
@@ -39,6 +48,10 @@ run_mode() {
     "$cxx" "${flags[@]}" "$root/tests/multi_tu_a.cpp" "$root/tests/multi_tu_b.cpp" \
         "$root/tests/multi_tu_main.cpp" -o "$output/multi_tu"
     "$output/multi_tu"
+    # Translation units with and without debug thread checks share local groups.
+    "$cxx" "${flags[@]}" "$root/tests/mixed_thread_check_off.cpp" "$root/tests/mixed_thread_check_on.cpp" \
+        "$root/tests/mixed_thread_check_main.cpp" -o "$output/mixed_thread_check"
+    "$output/mixed_thread_check"
     "$cxx" "${flags[@]}" "$root/tests/ownership_tests.cpp" -o "$output/ownership_tests"
     "$output/ownership_tests"
     "$cxx" "${flags[@]}" "$root/tests/borrow_tests.cpp" -o "$output/borrow_tests"
@@ -47,6 +60,12 @@ run_mode() {
     "$output/owner_from_this_tests"
     "$cxx" "${flags[@]}" "$root/tests/default_allocation_failure_tests.cpp" -o "$output/default_allocation_failure_tests"
     "$output/default_allocation_failure_tests"
+    "$cxx" "${flags[@]}" "$root/tests/fresh_hint_tests.cpp" -o "$output/fresh_hint_tests"
+    "$output/fresh_hint_tests"
+    "$cxx" "${flags[@]}" "$root/tests/local_exclusive_tests.cpp" -o "$output/local_exclusive_tests"
+    "$output/local_exclusive_tests"
+    "$cxx" "${flags[@]}" "$root/tests/null_comparison_tests.cpp" -o "$output/null_comparison_tests"
+    "$output/null_comparison_tests"
     "$cxx" "${flags[@]}" "$root/tests/unique_owner_tests.cpp" -o "$output/unique_owner_tests"
     "$output/unique_owner_tests"
     "$cxx" "${flags[@]}" "$root/tests/allocated_unique_owner_tests.cpp" -o "$output/allocated_unique_owner_tests"

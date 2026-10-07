@@ -1,0 +1,129 @@
+Codegen for dropping and copying shared_owner<int> (non-inlined helpers in a one-file TU).
+aarch64: clang 18, --target=aarch64-linux-gnu -march=armv8.1-a (LSE atomics) -O2 -DNDEBUG,
+         compiled against the host's libstdc++ 13 headers; codegen only, not run on Arm hardware.
+x86-64:  g++ 13.3.0 -O2 -DNDEBUG.
+
+== aarch64, split counts (previous): every decrement is ldaddal (acquire+release); a never-shared
+   object pays two of them (strong, then weak)
+_Z10drop_ownerPN3own12shared_ownerIiEE: // @_Z10drop_ownerPN3own12shared_ownerIiEE
+	stp	x29, x30, [sp, #-32]!           // 16-byte Folded Spill
+	str	x19, [sp, #16]                  // 8-byte Folded Spill
+	mov	x29, sp
+	ldr	x19, [x0]
+	cbz	x19, .LBB0_8
+	mov	x8, #-1                         // =0xffffffffffffffff
+	ldaddal	x8, x8, [x19]
+	cmp	x8, #1
+	b.ne	.LBB0_8
+	ldr	x8, [x19, #16]
+	ldr	x9, [x8, #16]
+	cbz	x9, .LBB0_6
+	mov	x0, x19
+	blr	x9
+	ldr	x8, [x0, #8]
+	cbz	x8, .LBB0_5
+	ldr	x0, [x0]
+	add	x1, x29, #24
+	str	x19, [x29, #24]
+	blr	x8
+	ldr	x19, [x29, #24]
+	str	xzr, [x29, #24]
+	cbz	x19, .LBB0_8
+.LBB0_5:
+	ldr	x8, [x19, #16]
+.LBB0_6:
+	ldr	x8, [x8]
+	mov	x0, x19
+	blr	x8
+	add	x8, x19, #8
+	mov	x9, #-1                         // =0xffffffffffffffff
+	ldaddal	x9, x8, [x8]
+	cmp	x8, #1
+	b.ne	.LBB0_8
+	ldr	x8, [x19, #16]
+	mov	x0, x19
+	ldr	x8, [x8, #8]
+	blr	x8
+.LBB0_8:
+	ldr	x19, [sp, #16]                  // 8-byte Folded Reload
+	ldp	x29, x30, [sp], #32             // 16-byte Folded Reload
+	ret
+
+== aarch64, packed counts (this revision): ldaddl (release only) on the shared word; ldar acquire
+   only after the last strong release; the weak release is an ldar compare against weak_one and
+   needs no read-modify-write when no weak observer exists
+_Z10drop_ownerPN3own12shared_ownerIiEE: // @_Z10drop_ownerPN3own12shared_ownerIiEE
+	b	_ZN3own12shared_ownerIiED2Ev
+_ZN3own12shared_ownerIiED2Ev:           // @_ZN3own12shared_ownerIiED2Ev
+	stp	x29, x30, [sp, #-32]!           // 16-byte Folded Spill
+	str	x19, [sp, #16]                  // 8-byte Folded Spill
+	mov	x29, sp
+	ldr	x19, [x0]
+	cbz	x19, .LBB1_9
+	mov	x8, #-1                         // =0xffffffffffffffff
+	ldaddl	x8, x8, [x19]
+	cmp	w8, #1
+	b.ne	.LBB1_9
+	ldar	xzr, [x19]
+	ldr	x8, [x19, #8]
+	ldr	x9, [x8, #16]
+	cbz	x9, .LBB1_6
+	mov	x0, x19
+	blr	x9
+	ldr	x8, [x0, #8]
+	cbz	x8, .LBB1_5
+	ldr	x0, [x0]
+	add	x1, x29, #24
+	str	x19, [x29, #24]
+	blr	x8
+	ldr	x19, [x29, #24]
+	str	xzr, [x29, #24]
+	cbz	x19, .LBB1_9
+.LBB1_5:
+	ldr	x8, [x19, #8]
+.LBB1_6:
+	ldr	x8, [x8]
+	mov	x0, x19
+	blr	x8
+	ldar	x8, [x19]
+	mov	x9, #4294967296                 // =0x100000000
+	cmp	x8, x9
+	b.eq	.LBB1_8
+	mov	x8, #-4294967296                // =0xffffffff00000000
+	ldaddal	x8, x8, [x19]
+	lsr	x8, x8, #32
+	cmp	x8, #1
+	b.ne	.LBB1_9
+.LBB1_8:
+	ldr	x8, [x19, #8]
+	mov	x0, x19
+	ldr	x8, [x8, #8]
+	blr	x8
+.LBB1_9:
+	ldr	x19, [sp, #16]                  // 8-byte Folded Reload
+	ldp	x29, x30, [sp], #32             // 16-byte Folded Reload
+	ret
+
+== x86-64, packed counts: copy is one lock xadd on the shared word
+copy_owner(own::shared_owner<int> const&, own::shared_owner<int>*):
+.LFB1029:
+	endbr64
+	movdqu	(%rdi), %xmm0
+	movq	%xmm0, %rax
+	movups	%xmm0, (%rsi)
+	testq	%rax, %rax
+	je	.L30
+	movl	$1, %edx
+	lock xaddq	%rdx, (%rax)
+	movl	%edx, %eax
+	subq	$1, %rax
+	cmpq	$2147483646, %rax
+	ja	.L35
+	ret
+.L30:
+	ret
+copy_owner(own::shared_owner<int> const&, own::shared_owner<int>*) [clone .cold]:
+.LFSB1029:
+.L35:
+	pushq	%rax
+	call	abort@PLT

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <new>
+#include <thread>
 
 namespace {
 std::atomic<int> fail_after{-1};
@@ -75,8 +76,15 @@ template <class T> void factory_failures() {
     fail_after = 0;
     CHECK(throws_bad_alloc([&] { auto owner = own::make_local<T>(destroyed); (void)owner; }));
     CHECK(destroyed == 0 && live_allocations == baseline);
+    // make_local places its first group inside the block: one allocation, so
+    // a failure armed for a second allocation is never reached.
     fail_after = 1;
-    CHECK(throws_bad_alloc([&] { auto owner = own::make_local<T>(destroyed); (void)owner; }));
+    {
+        auto owner = own::make_local<T>(destroyed);
+        const bool one_allocation = fail_after.load() == 0 && live_allocations == baseline + 1;
+        fail_after = -1;
+        CHECK(owner && one_allocation && owner.local_use_count() == 1);
+    }
     CHECK(destroyed == 1 && live_allocations == baseline);
     fail_after = -1;
 }
@@ -98,6 +106,38 @@ void localization_failures() {
     CHECK(destroyed == 1 && live_allocations == baseline);
     fail_after = -1;
 }
+// Default-allocator local groups reuse one freed group's storage per thread.
+void localize_reuses_thread_cached_group() {
+    int destroyed = 0;
+    auto owner = own::make_shared<tracked>(destroyed);
+    std::thread worker([&] {
+        // Constructed before the cache registers its thread-exit cleanup, so it
+        // is destroyed after that cleanup: its group must be freed directly
+        // rather than refill an ended cache (ASan reports either mistake).
+        thread_local own::local_owner<tracked> late = owner.localize();
+        CHECK(late.local_use_count() == 1);
+        { auto first = owner.localize(); (void)first; } // fills this thread's cache
+        const int baseline = live_allocations.load();
+        fail_after = 0; // any allocation would now throw
+        bool allocated = false;
+        try {
+            for (int i = 0; i < 1000; ++i) {
+                auto local = owner.localize();
+                auto copy = local;
+                (void)copy;
+            }
+        } catch (const std::bad_alloc&) { allocated = true; }
+        fail_after = -1;
+        CHECK(!allocated && live_allocations == baseline);
+    });
+    const int before = live_allocations.load();
+    worker.join();
+    // Exit freed the cached slot and the late owner's group: nothing leaked.
+    CHECK(live_allocations < before && owner.use_count() == 1 && destroyed == 0);
+    owner.reset();
+    CHECK(destroyed == 1);
+}
+
 void borrowed_access_never_allocates() {
     int destroyed = 0;
     {
@@ -126,7 +166,9 @@ void borrowed_access_never_allocates() {
 int main() {
     test::run("default factory allocation failures", factory_failures<tracked>);
     test::run("aligned default factory allocation failures", factory_failures<aligned_tracked>);
+    // Runs before any localize() on this thread, so its group cache is empty.
     test::run("default localization allocation failures", localization_failures);
+    test::run("localize reuses thread-cached group storage", localize_reuses_thread_cached_group);
     test::run("borrowed access and copies never allocate", borrowed_access_never_allocates);
     return test::finish();
 }

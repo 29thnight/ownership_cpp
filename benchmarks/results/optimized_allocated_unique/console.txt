@@ -1,0 +1,45 @@
+SIZE handle own_allocated_40=40 proto_header_16=16 std_erased_40=40 std_default_8=8
+SIZE allocation own_allocated_40=32 proto_header_16=56 (payload 32)
+case                   impl               median_ns     min_ns     p90_ns      cv
+create_read_destroy    own_allocated_40       9.993      9.544     10.534   0.261
+RESULT create_read_destroy/own_allocated_40 9.993 ns
+move_chain             own_allocated_40       1.786      1.735      3.280   0.291
+RESULT move_chain/own_allocated_40 1.786 ns
+vector_transfer_4096   own_allocated_40       2.530      2.505      2.789   0.418
+RESULT vector_transfer_4096/own_allocated_40 2.530 ns
+owner_scan_4096        own_allocated_40       0.471      0.463      0.504   0.040
+RESULT owner_scan_4096/own_allocated_40 0.471 ns
+create_read_destroy    proto_header_16       10.240     10.001     10.714   0.212
+RESULT create_read_destroy/proto_header_16 10.240 ns
+move_chain             proto_header_16        1.921      1.899      1.954   0.059
+RESULT move_chain/proto_header_16 1.921 ns
+vector_transfer_4096   proto_header_16        1.485      1.460      1.561   0.235
+RESULT vector_transfer_4096/proto_header_16 1.485 ns
+owner_scan_4096        proto_header_16        0.436      0.426      1.264   0.548
+RESULT owner_scan_4096/proto_header_16 0.436 ns
+create_read_destroy    std_erased_40          9.928      9.634     20.388   0.351
+RESULT create_read_destroy/std_erased_40 9.928 ns
+move_chain             std_erased_40          1.764      1.732      2.821   0.215
+RESULT move_chain/std_erased_40 1.764 ns
+vector_transfer_4096   std_erased_40          3.109      3.040      3.205   0.422
+RESULT vector_transfer_4096/std_erased_40 3.109 ns
+owner_scan_4096        std_erased_40          0.476      0.468      0.653   0.217
+RESULT owner_scan_4096/std_erased_40 0.476 ns
+create_read_destroy    std_erased_40_b        9.931      9.572     10.811   0.199
+RESULT create_read_destroy/std_erased_40_b 9.931 ns
+move_chain             std_erased_40_b        1.763      1.726      2.118   0.176
+RESULT move_chain/std_erased_40_b 1.763 ns
+vector_transfer_4096   std_erased_40_b        3.150      3.077     11.029   0.835
+RESULT vector_transfer_4096/std_erased_40_b 3.150 ns
+owner_scan_4096        std_erased_40_b        0.473      0.464      0.483   0.114
+RESULT owner_scan_4096/std_erased_40_b 0.473 ns
+create_read_destroy    std_default_8          9.642      9.415      9.934   0.186
+RESULT create_read_destroy/std_default_8 9.642 ns
+move_chain             std_default_8          0.790      0.772      0.831   0.032
+RESULT move_chain/std_default_8 0.790 ns
+vector_transfer_4096   std_default_8          2.273      2.151      2.358   0.025
+RESULT vector_transfer_4096/std_default_8 2.273 ns
+owner_scan_4096        std_default_8          0.382      0.375      0.400   0.348
+RESULT owner_scan_4096/std_default_8 0.382 ns
+samples=15 warmups=2 scale=1
+verification: every sample matched its checksum
