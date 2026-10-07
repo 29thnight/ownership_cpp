@@ -18,6 +18,12 @@
 #endif
 #endif
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#define OWN_NOINLINE __declspec(noinline)
+#else
+#define OWN_NOINLINE __attribute__((noinline))
+#endif
+
 #ifndef OWN_ENABLE_UNSAFE_GET_WARNING
 #define OWN_ENABLE_UNSAFE_GET_WARNING 1
 #endif
@@ -310,13 +316,22 @@ namespace own
 
         struct local_group
         {
-            // Alias count in the low bits. The top bit marks an exclusive group:
-            // its strong reference is the only reference of any kind to the
-            // block, which only a local factory can establish and only this
+            // Alias count in steps of `one_alias`; the low bit marks an exclusive
+            // group: its strong reference is the only reference of any kind to
+            // the block, which only a local factory can establish and only this
             // thread can end (share(), weak observation). Packed here so the
-            // group stays five words.
-            static constexpr std::size_t exclusive_bit = ~(count_limit >> 1);
-            std::size_t references = 1;
+            // group stays five words, and in the low bit so counting and the
+            // zero test stay single compares.
+            static constexpr std::size_t exclusive_bit = 1;
+            static constexpr std::size_t one_alias = 2;
+            std::size_t references = one_alias;
+            std::size_t alias_count() const noexcept { return references / one_alias; }
+            void end_exclusive() noexcept
+            {
+                // Writes only when set: a store right before the caller's locked
+                // increment would make that instruction wait for it.
+                if (references & exclusive_bit) { references &= ~exclusive_bit; }
+            }
             control_block* block;
             // Only what release() needs: 2 words rather than a whole allocator_ref.
             void* context;
@@ -339,34 +354,35 @@ namespace own
             void add_reference() noexcept
             {
                 check_thread();
-                if ((references & ~exclusive_bit) >= (exclusive_bit - 1)) { fail_fast(); }
-                ++references;
+                if (references >= count_limit - exclusive_bit) { fail_fast(); }
+                references += one_alias;
             }
             void release() noexcept
             {
                 check_thread();
-                if (((--references) & ~exclusive_bit) == 0)
+                references -= one_alias;
+                if (references < one_alias) [[unlikely]] { end(); }
+            }
+            // Out of line so that copies and drops of aliases, which happen in
+            // loops, inline as a subtract and a compare.
+            OWN_NOINLINE void end() noexcept
+            {
+                // An exclusive group's strong reference is the only reference of
+                // any kind, and none can be created except through this group, so
+                // no other thread can touch the counts: no atomic decrement.
+                const bool exclusive = references == exclusive_bit;
+                auto* control = block;
+                auto* resource = context;
+                auto release_storage = deallocate;
+                this->~local_group();
+                release_storage(resource, this, sizeof(local_group), alignof(local_group));
+                if (exclusive)
                 {
-                    if (references & exclusive_bit)
-                    {
-                        // No other owner, observer or registration exists and
-                        // none can be created except through this group, so no
-                        // other thread can touch the counts: no atomic decrement.
-                        references = 0;
-                        auto* control = block;
-                        auto* resource = context;
-                        auto release_storage = deallocate;
-                        this->~local_group();
-                        release_storage(resource, this, sizeof(local_group), alignof(local_group));
-                        control->counts.store(weak_one, std::memory_order_relaxed);
-                        last_strong_released(control);
-                        return;
-                    }
-                    auto* control = block;
-                    auto* resource = context;
-                    auto release_storage = deallocate;
-                    this->~local_group();
-                    release_storage(resource, this, sizeof(local_group), alignof(local_group));
+                    control->counts.store(weak_one, std::memory_order_relaxed);
+                    last_strong_released(control);
+                }
+                else
+                {
                     release_strong(control);
                 }
             }
@@ -927,13 +943,13 @@ namespace own
         std::size_t local_use_count() const noexcept
         {
             check_thread();
-            return group_ ? group_->references & ~detail::local_group::exclusive_bit : 0;
+            return group_ ? group_->alias_count() : 0;
         }
         [[nodiscard]] shared_owner<T> share() const noexcept
         {
             check_thread();
             if (!group_) { return {}; }
-            group_->references &= ~detail::local_group::exclusive_bit;
+            group_->end_exclusive();
             detail::add_strong(group_->block);
             return shared_owner<T>(group_->block, pointer_);
         }
@@ -1024,7 +1040,7 @@ namespace own
             other.check_thread();
             if (other.group_)
             {
-                other.group_->references &= ~detail::local_group::exclusive_bit;
+                other.group_->end_exclusive();
                 block_ = other.group_->block;
                 pointer_ = other.pointer_;
                 detail::add_weak(block_);
