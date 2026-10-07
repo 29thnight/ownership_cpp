@@ -1,5 +1,7 @@
 # ownership_cpp
 
+[![CI](https://github.com/29thnight/ownership_cpp/actions/workflows/ci.yml/badge.svg)](https://github.com/29thnight/ownership_cpp/actions/workflows/ci.yml)
+
 Header-only C++20 ownership and borrowing in namespace `own`.
 
 Keep ownership at lifetime boundaries. Pass cheap, non-owning views through
@@ -126,11 +128,15 @@ same pointer-sized non-owning `local_view` access model.
 its rejected 40-byte prototype, both standard baselines, and the opt-in type under
 matched lifetime contracts. Results distinguish forced-observable moves from
 optimized container/frame/job use; the former are not whole-engine timings.
-The final 23,808-sample study did **not** establish the requested ~1% goal:
-the default pointer-sized owner was close to standard ownership in the tested
-workloads, while opt-in allocated-owner move/vector ratios remained 1.548×/1.140×
-versus state-matched standard ownership. Confidence intervals and A/A controls
-are retained in the report.
+That 23,808-sample study did **not** establish the requested ~1% goal: the default
+pointer-sized owner was close to standard ownership in the tested workloads, while
+opt-in allocated-owner move/vector ratios were then 1.548×/1.140× versus
+state-matched standard ownership. Confidence intervals and A/A controls are
+retained in the report. A later revision replaced the allocated owner's move
+assignment and inlined its default allocation: moving one owner through 64 slots
+now measures 1.80 ns against 1.79 ns for the same-size standard owner, moving
+4,096 owners between vectors 2.59 against 3.12 ns, and create/destroy 10.04
+against 9.95 ns ([allocated-owner layout report](docs/allocated_unique_layout.md)).
 
 ## Ownership from `this`
 
@@ -221,7 +227,13 @@ header, as dense as the standard library's); `make_local` and `allocate_local`
 place their first 40-byte local group in the same block, also one allocation.
 Every further nonempty `localize()` creates a separate group; with the default
 allocator each thread reuses the storage of its most recently freed group, so
-repeated localize/drop cycles do not reach the allocator. A
+repeated localize/drop cycles do not reach the allocator.
+
+Destroying an object that was never shared avoids an atomic read-modify-write
+where it can. The handle a factory returns carries a hint (copies clear it) and
+checks the counts once on release, skipping the decrement when it is the sole
+reference; copies release with one `fetch_sub`. A local group created by
+`make_local` that was never shared or observed releases with a plain store. A
 payload read on one core while other cores copy its owners shares a cache line
 with the counts; declare such a hot type `alignas(64)` to give it its own line
 ([measurements](docs/benchmark_layout.md)).
@@ -252,7 +264,16 @@ make example
 make benchmark-unique
 # Reference-count contention at 1..N threads (QUICK=1 for a smoke test):
 make benchmark-scaling
+# Control-block footprint, scans and cache-line sharing (QUICK=1 for a smoke test):
+make benchmark-layout
+# Allocator-aware exclusive owner layout (measurement only):
+make benchmark-allocated-unique
 ```
+
+The scaling and layout harnesses accept `--pin 1` to give each thread its own CPU,
+include a second identical std implementation as an A/A noise control, and record
+the CPU, cores, frequency, SMT, compiler flags, workload, baseline and method for
+every run.
 
 Requires an existing C++20 compiler with exceptions and a POSIX shell for the
 supplied runners. The library itself is a single header under `include/own`.
@@ -274,16 +295,45 @@ lists the remaining measured costs and planned improvements, and the
 [optimization round](docs/optimization_round.md) records the latest before/after
 comparison across every harness.
 
-Clang 18 on Linux x86-64 passes the debug and release suites; the CI workflow
-(`.github/workflows/ci.yml`) also runs every sanitizer mode with GCC and Clang and
-smoke-runs the benchmark harnesses. Windows/MSVC, macOS and other architectures
-are not yet validated. These
-are CPU simulations, not measured engine integration or actual GPU execution.
+GCC 13 and Clang 18 on Linux x86-64 pass every mode (debug, release, ASan, UBSan,
+TSan) locally and in CI (`.github/workflows/ci.yml`), which also compiles every
+benchmark harness with `-Werror`, smoke-runs them and runs the examples. Clang's
+TSan builds link the shared sanitizer runtime because the allocation-failure tests
+replace the global `operator new`. Windows/MSVC, macOS and other architectures are
+not yet validated; Arm code generation was inspected but not timed. These are CPU
+simulations, not measured engine integration or actual GPU execution.
 
-## Measured borrowing costs
+## Current measured costs
 
-The following published results describe the view/from-this revision; exclusive
-ownership additions are measured separately in [unique results](docs/unique_results.md).
+GCC 13.3, `-O3 -DNDEBUG -march=native`, one 4-vCPU Intel Xeon cloud VM, main
+harness with 101 samples after 5 warmups in two independent processes
+(primary / repeat, median ns per operation). Each case uses the same lifetime
+contract on both sides:
+
+| Workload | own | `std::shared_ptr` |
+| --- | ---: | ---: |
+| `make_shared`, read, destroy (never shared) | 12.59 / 12.64 | 12.64 / 12.61 |
+| `make_local`, read, destroy | 15.31 / 15.35 | 12.64 / 12.61 |
+| Shared copy, read, drop | 11.28 / 11.26 | 16.82 / 16.83 |
+| Local alias copy, read, drop | 1.02 / 1.02 | 16.82 / 16.83 |
+| Weak lock of a live object | 15.05 / 15.09 | 17.01 / 17.10 |
+| Localize from a shared owner, read, drop | 13.03 / 12.99 | 15.03 / 15.06 |
+| Shared copies on two contending workers | 55.54 / 49.88 | 67.96 / 71.02 |
+| Shared copy/drop, four threads on one object (pinned) | 209.53 | 347.42 |
+
+`make_local` is the remaining slower row: its generated code is unchanged from
+a measurement at 13.4 ns, and the difference follows code placement in this
+harness ([analysis](docs/optimization_round.md)). Never-shared objects that need
+no shared lifetime are cheapest as `unique_owner`. Data and the method behind
+each row are in the [optimization round](docs/optimization_round.md),
+[count layout](docs/benchmark_counts.md), [control-block layout](docs/benchmark_layout.md)
+and [contention scaling](docs/benchmark_scaling.md) reports.
+
+## Measured borrowing costs (view/from-this revision)
+
+The following published results describe the earlier view/from-this revision and
+remain as its record; current costs are above, and exclusive ownership is
+measured separately in [unique results](docs/unique_results.md).
 
 
 GCC 14.2, one Linux x86-64 cloud VM, optimized builds, 101 warmed samples and
@@ -319,6 +369,8 @@ atomic handle objects, owner-to-owner equality, ordering and hashing, raw adopti
 arbitrary payload deleters and an STL allocator-traits adapter are omitted. Owners
 and views compare only with `nullptr` (`owner == nullptr`, `view != nullptr`);
 weak observers have no null comparison, use `expired()` or `lock()`. Payload destructors must
-be `noexcept`. Strong-reference cycles still need weak links.
+be `noexcept`. Strong-reference cycles still need weak links. Strong and weak counts
+are 32 bits each in one atomic word and abort beyond 2^31 references per object,
+the same order as the standard library's `int` counts.
 
 MIT; the original [LICENSE](LICENSE) is preserved.
