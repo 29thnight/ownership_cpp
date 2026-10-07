@@ -1,197 +1,3 @@
-# ownership_cpp
-
-Header-only C++20 ownership and borrowing in namespace `own`.
-
-Keep ownership at lifetime boundaries. Pass cheap, non-owning views through
-ordinary function calls and loops:
-
-- `unique_owner<T>` is the default for exclusive ownership: move it, do not copy it
-- `shared_owner<T>` supports multiple independent owners; use it when sharing is needed
-- `local_view<T>` borrows access; pointer-sized, trivially copyable, with no allocation,
-  reference-count update, or owned guard
-- `weak_owner<T>` observes a potentially expired lifetime; `lock()` before use
-
-The production header implements its own reference counting. It uses low-level
-standard facilities, not standard smart pointers, containers, or a third-party
-runtime. The optional `local_owner<T>` serves a different need: independent owning
-copies confined to one thread. It is not a borrowed view.
-
-## Quick start
-
-```cpp
-#include <own/ownership.hpp>
-
-struct asset { int version; };
-void draw(own::local_view<const asset> view)
-{
-    // Read view->version. The caller keeps an owner alive for this call.
-}
-
-auto owner = own::make_unique<asset>(1);
-auto view = owner.borrow();
-auto another_view = view;             // copies one pointer; owns nothing
-draw(another_view);
-
-// A separately shared lifetime, when multiple owners or weak observation are needed:
-auto shared = own::make_shared<asset>(2);
-own::weak_owner<asset> observed(shared);
-if (auto locked = observed.lock())
-{
-    draw(locked.borrow());            // locked owns this entire use
-}
-```
-
-A view does not detect expiration and does not prolong lifetime. Keep an owner
-alive for every access and any derived reference. Do not retain the view in a
-long-lived object, callback or async job unless that lifetime is covered separately.
-Async work can take a moved `unique_owner` when it becomes the sole owner, or a
-`shared_owner` when other owners must remain. Borrow only inside the retained scope.
-See the [complete asset workflow](examples/asset_workflow.cpp).
-
-## A scope can own once and borrow many times
-
-If the original owner stays alive, no extra guard is needed. For an already shared
-object whose source handle might reset, keep one shared copy for the whole scope:
-
-```cpp
-auto scope_owner = shared;            // one strong-reference increment
-shared.reset();                       // safe: scope_owner still owns the asset
-auto view = scope_owner.borrow();
-for (int i = 0; i < 100; ++i) { draw(view); }
-```
-
-A unique owner cannot be copied to pin an independent scope: keep it alive or move
-it into that scope. Unique-to-shared promotion is not provided; choose shared
-ownership when constructing an object that needs multiple owners.
-
-There is no privileged root owner and no per-view guard. Any remaining strong
-owner keeps the object alive. Views never turn themselves back into ownership.
-A `shared_owner` protects lifetime, not unsynchronized mutable payload access.
-
-`borrow()` and `unsafe_get()` reject temporary/rvalue owners to catch obvious
-escaping-lifetime mistakes. Ordinary `locked->member` and `weak.lock()->member`
-syntax remains available; check a lock succeeded before dereferencing it. C++ can
-still retain references or explicitly call `operator->()`, so this is not a borrow
-checker or a security boundary. Never use a dangling view, even to adjust a virtual
-base pointer during conversion.
-
-## Exclusive ownership
-
-```cpp
-auto object = own::make_unique<asset>(3);
-auto next_owner = std::move(object);  // object becomes empty; payload stays put
-auto view = next_owner.borrow();
-next_owner.reset();                  // destroys payload; do not use view afterward
-```
-
-The default `unique_owner<T>` contains only `T*`: **8 bytes on the tested 64-bit
-ABI**, matching default `std::unique_ptr<T>`. It has no reference count, shared
-control block, allocator context or runtime deleter. `make_unique<T>(args...)`
-uses ordinary `new T(args...)`; destruction uses typed `delete`. Class-specific
-allocation/deallocation functions and constructor-failure cleanup follow C++
-new/delete rules together, rather than mixing allocation schemes.
-
-Moves, `reset`, `swap`, `bool`, `*`, `->`, `borrow` and the warned `unsafe_get` are
-supported. Safe const qualification is allowed. An owning derived-to-base move
-requires public, unambiguous conversion and an accessible, `noexcept`, virtual
-base destructor. Non-virtual owning upcasts are rejected: retain the derived
-owner and convert its borrowed view to access that base instead. The payload type
-must be complete wherever default destruction/reset is instantiated, as with
-ordinary standard unique ownership.
-
-### Runtime allocator is explicit opt-in
-
-`allocate_unique<T>(allocator_ref, args...)` returns a different type,
-`allocated_unique_owner<T>`. It allocates the object through the byte allocator,
-constructs with global placement new, then uses the original concrete destructor
-and allocator callback. It does not invoke class-specific storage allocation or
-deallocation. Allocation failure/null and constructor unwinding follow the
-`allocator_ref` contract.
-
-That opt-in owner stores the access pointer, original allocation address,
-allocator context, deallocation function and concrete destruction function:
-**40 bytes on this ABI**, without a second heap allocation or reference count.
-Its preserved concrete cleanup also allows safe non-virtual-base ownership
-conversion. This extra capability and cost do not burden ordinary `make_unique`.
-The allocator context is borrowed and must remain valid through disposal; its
-`noexcept` deallocation callback must work on the eventual destruction thread.
-
-Neither owner supports copying, `release`, raw/reference adoption, raw reset,
-arbitrary user deleters, or conversion to the other owner kind/shared/weak
-ownership. Neither provides a retirement hook. They may move between synchronized
-threads, but concurrent mutation of the same handle is unsafe. Both retain the
-same pointer-sized non-owning `local_view` access model.
-
-[Exclusive-owner measurements](docs/unique_results.md) compare the lean default,
-its rejected 40-byte prototype, both standard baselines, and the opt-in type under
-matched lifetime contracts. Results distinguish forced-observable moves from
-optimized container/frame/job use; the former are not whole-engine timings.
-The final 23,808-sample study did **not** establish the requested ~1% goal:
-the default pointer-sized owner was close to standard ownership in the tested
-workloads, while opt-in allocated-owner move/vector ratios remained 1.548×/1.140×
-versus state-matched standard ownership. Confidence intervals and A/A controls
-are retained in the report.
-
-## Ownership from `this`
-
-Publicly inherit from `enable_owner_from_this<T>`:
-
-```cpp
-struct node : own::enable_owner_from_this<node>
-{
-    auto retain_for_job() { return shared_from_this(); }
-    auto inspect_locally() { return local_from_this(); } // non-owning local_view
-};
-auto node_owner = own::make_shared<node>();
-auto retained = node_owner->shared_from_this();
-auto borrowed = node_owner->borrow_from_this();
-```
-
-- `shared_from_this()` returns ownership of the **same** control block
-- `weak_from_this()` returns a weak observer
-- `borrow_from_this()` and `local_from_this()` are synonyms returning non-owning
-  views; the caller must already ensure lifetime throughout their use. Unlike
-  `owner.borrow()`, these methods make one relaxed atomic count load to check
-  registration/liveness; they neither increment the count nor acquire ownership
-- Const overloads return `const T` access. Public, unambiguous derived/base and
-  virtual inheritance are supported; inaccessible, ambiguous or mismatched bases
-  are rejected when a factory instantiates registration
-- Shared/local factories register after the object's constructor finishes. Unmanaged objects
-  and constructor calls return empty handles/views. After last strong release,
-  shared/view results are empty and weak results are expired observers that may
-  still retain the control block. A destructor cannot resurrect the object
-- Copy/move construction does not copy registration; assignment keeps the target's
-  existing registration. A factory-created copy receives its own control block
-
-Publish a factory-created object to other threads only after the factory returns;
-registration is initialization, not a concurrent binding protocol.
-Call these methods only on an object whose lifetime is already valid. Returning
-empty for a live unmanaged/retiring object does not make a dangling `this` safe.
-A view extracted from a temporary successful weak lock does not keep that lock's
-ownership after the full expression ends; hold the locked owner throughout use.
-
-Unique factories do not register this mixin or create a shared control block.
-Under either `unique_owner` or `allocated_unique_owner`, its shared/weak/from-this
-view methods remain empty; borrow from the owning handle for access. There is no `unique_from_this()` because it
-would create a second exclusive owner, and no automatic unique-to-shared promotion.
-
-No constructor adopts raw `this`, a raw pointer, or an object reference.
-See [the working example](examples/owner_from_this.cpp) and [lifetime details](docs/design.md).
-
-## Explicit raw-pointer escape
-
-`get()` has been replaced by `unsafe_get()`. By default its use warns:
-
-```text
-Borrowed raw pointer: caller must preserve lifetime; do not delete or otherwise deallocate the returned pointer
-```
-
-The returned pointer is borrowed. Never delete, free, adopt, or deallocate it.
-There is no implicit raw-pointer conversion or public raw/reference ownership
-constructor, reset overload, or adoption API. Prefer `borrow()`, `T&`, or `T const&`.
-The same escape warning applies to a view's `unsafe_get()`.
-
-Define `OWN_ENABLE_UNSAFE_GET_WARNING=0` before inclusion to opt out of the warning
 (for example for a deliberately audited C API boundary). The default is `1`;
 `-Werror=deprecated-declarations` turns this warning into an error. Use one value
 consistently across every translation unit. Ordinary `*`, `->`, `bool` and `borrow()`
@@ -221,7 +27,13 @@ header, as dense as the standard library's); `make_local` and `allocate_local`
 place their first 40-byte local group in the same block, also one allocation.
 Every further nonempty `localize()` creates a separate group; with the default
 allocator each thread reuses the storage of its most recently freed group, so
-repeated localize/drop cycles do not reach the allocator. A
+repeated localize/drop cycles do not reach the allocator.
+
+Destroying an object that was never shared avoids an atomic read-modify-write
+where it can. The handle a factory returns carries a hint (copies clear it) and
+checks the counts once on release, skipping the decrement when it is the sole
+reference; copies release with one `fetch_sub`. A local group created by
+`make_local` that was never shared or observed releases with a plain store. A
 payload read on one core while other cores copy its owners shares a cache line
 with the counts; declare such a hot type `alignas(64)` to give it its own line
 ([measurements](docs/benchmark_layout.md)).
@@ -252,7 +64,16 @@ make example
 make benchmark-unique
 # Reference-count contention at 1..N threads (QUICK=1 for a smoke test):
 make benchmark-scaling
+# Control-block footprint, scans and cache-line sharing (QUICK=1 for a smoke test):
+make benchmark-layout
+# Allocator-aware exclusive owner layout (measurement only):
+make benchmark-allocated-unique
 ```
+
+The scaling and layout harnesses accept `--pin 1` to give each thread its own CPU,
+include a second identical std implementation as an A/A noise control, and record
+the CPU, cores, frequency, SMT, compiler flags, workload, baseline and method for
+every run.
 
 Requires an existing C++20 compiler with exceptions and a POSIX shell for the
 supplied runners. The library itself is a single header under `include/own`.
@@ -274,16 +95,45 @@ lists the remaining measured costs and planned improvements, and the
 [optimization round](docs/optimization_round.md) records the latest before/after
 comparison across every harness.
 
-Clang 18 on Linux x86-64 passes the debug and release suites; the CI workflow
-(`.github/workflows/ci.yml`) also runs every sanitizer mode with GCC and Clang and
-smoke-runs the benchmark harnesses. Windows/MSVC, macOS and other architectures
-are not yet validated. These
-are CPU simulations, not measured engine integration or actual GPU execution.
+GCC 13 and Clang 18 on Linux x86-64 pass every mode (debug, release, ASan, UBSan,
+TSan) locally and in CI (`.github/workflows/ci.yml`), which also compiles every
+benchmark harness with `-Werror`, smoke-runs them and runs the examples. Clang's
+TSan builds link the shared sanitizer runtime because the allocation-failure tests
+replace the global `operator new`. Windows/MSVC, macOS and other architectures are
+not yet validated; Arm code generation was inspected but not timed. These are CPU
+simulations, not measured engine integration or actual GPU execution.
 
-## Measured borrowing costs
+## Current measured costs
 
-The following published results describe the view/from-this revision; exclusive
-ownership additions are measured separately in [unique results](docs/unique_results.md).
+GCC 13.3, `-O3 -DNDEBUG -march=native`, one 4-vCPU Intel Xeon cloud VM, main
+harness with 101 samples after 5 warmups in two independent processes
+(primary / repeat, median ns per operation). Each case uses the same lifetime
+contract on both sides:
+
+| Workload | own | `std::shared_ptr` |
+| --- | ---: | ---: |
+| `make_shared`, read, destroy (never shared) | 12.59 / 12.64 | 12.64 / 12.61 |
+| `make_local`, read, destroy | 15.31 / 15.35 | 12.64 / 12.61 |
+| Shared copy, read, drop | 11.28 / 11.26 | 16.82 / 16.83 |
+| Local alias copy, read, drop | 1.02 / 1.02 | 16.82 / 16.83 |
+| Weak lock of a live object | 15.05 / 15.09 | 17.01 / 17.10 |
+| Localize from a shared owner, read, drop | 13.03 / 12.99 | 15.03 / 15.06 |
+| Shared copies on two contending workers | 55.54 / 49.88 | 67.96 / 71.02 |
+| Shared copy/drop, four threads on one object (pinned) | 209.53 | 347.42 |
+
+`make_local` is the remaining slower row: its generated code is unchanged from
+a measurement at 13.4 ns, and the difference follows code placement in this
+harness ([analysis](docs/optimization_round.md)). Never-shared objects that need
+no shared lifetime are cheapest as `unique_owner`. Data and the method behind
+each row are in the [optimization round](docs/optimization_round.md),
+[count layout](docs/benchmark_counts.md), [control-block layout](docs/benchmark_layout.md)
+and [contention scaling](docs/benchmark_scaling.md) reports.
+
+## Measured borrowing costs (view/from-this revision)
+
+The following published results describe the earlier view/from-this revision and
+remain as its record; current costs are above, and exclusive ownership is
+measured separately in [unique results](docs/unique_results.md).
 
 
 GCC 14.2, one Linux x86-64 cloud VM, optimized builds, 101 warmed samples and
@@ -319,6 +169,8 @@ atomic handle objects, owner-to-owner equality, ordering and hashing, raw adopti
 arbitrary payload deleters and an STL allocator-traits adapter are omitted. Owners
 and views compare only with `nullptr` (`owner == nullptr`, `view != nullptr`);
 weak observers have no null comparison, use `expired()` or `lock()`. Payload destructors must
-be `noexcept`. Strong-reference cycles still need weak links.
+be `noexcept`. Strong-reference cycles still need weak links. Strong and weak counts
+are 32 bits each in one atomic word and abort beyond 2^31 references per object,
+the same order as the standard library's `int` counts.
 
 MIT; the original [LICENSE](LICENSE) is preserved.
