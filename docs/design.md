@@ -137,11 +137,21 @@ conversion preserves ownership of the original concrete allocation. Multiple
 local groups may exist on the same thread or different threads: locality is an
 explicit scope, not an implicit map keyed by thread identity.
 
-Strong and weak increments use compare/exchange loops with fail-fast overflow
-checking before mutation. An unchecked fetch-add can wrap through zero during a
-race; this implementation does not permit that transient state. CAS can be more
-expensive than `std::shared_ptr`'s common fetch-add implementation under contention.
-This is an intentional safety/performance tradeoff, measured separately.
+Strong and weak increments by a holder of an existing reference use one relaxed
+`fetch_add` and check the previous value afterward: zero (a use after release) or
+a value at or above `saturation_limit` (half the counter range) aborts. A racing
+increment that has not yet observed the threshold has the other half of the range
+as headroom, so the counter cannot wrap through zero and resurrect a retired
+block. Weak locking still uses a compare/exchange loop because it must not
+increment a zero count; it aborts at the same threshold.
+
+Earlier revisions used a compare/exchange loop for every increment. Under
+contention that loop needs extra transfers of the control-block line: on a
+4-core Xeon VM, four threads copying one owner measured 367.7/321.1 ns per
+copy/drop pair (primary/repeat) with the loop and 206.4/192.9 ns after this change,
+below `std::shared_ptr`'s 373.4/342.5 ns in the same runs. Uncontended copies and
+weak locking were unchanged. See
+[the scaling report](benchmark_scaling.md) for the full method and data.
 
 Strong decrements use acquire/release atomics. The thread observing the final
 reference sees prior releases and dispatches disposal. Weak locking uses a CAS

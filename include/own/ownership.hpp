@@ -147,21 +147,19 @@ namespace own
     namespace detail
     {
         inline constexpr std::size_t count_limit = static_cast<std::size_t>(-1);
+        // Shared counts abort at half the range. The other half is headroom for
+        // increments already in flight when one thread reaches the threshold.
+        inline constexpr std::size_t saturation_limit = count_limit / 2;
 
-        // CAS rather than unchecked fetch_add: even a racing overflow cannot
-        // wrap through zero and resurrect a retired control block.
+        // One locked add instead of a load + compare-exchange retry loop, which
+        // costs extra round trips of the contended line. Every caller already
+        // holds a reference, so a previous value of zero is a use-after-release
+        // bug, and reaching the threshold aborts. Wrapping through zero would need
+        // more than saturation_limit concurrent unobserved increments.
         inline void increment(std::atomic<std::size_t>& count) noexcept
         {
-            auto value = count.load(std::memory_order_relaxed);
-            for (;;)
-            {
-                if (value == 0 || value == count_limit) { fail_fast(); }
-                if (count.compare_exchange_weak(value, value + 1,
-                        std::memory_order_relaxed, std::memory_order_relaxed))
-                {
-                    return;
-                }
-            }
+            const auto previous = count.fetch_add(1, std::memory_order_relaxed);
+            if (previous == 0 || previous >= saturation_limit) [[unlikely]] { fail_fast(); }
         }
 
         struct control_block
@@ -209,7 +207,7 @@ namespace own
             auto value = block->strong.load(std::memory_order_relaxed);
             while (value != 0)
             {
-                if (value == count_limit) { fail_fast(); }
+                if (value >= saturation_limit) { fail_fast(); }
                 if (block->strong.compare_exchange_weak(value, value + 1,
                         std::memory_order_acquire, std::memory_order_relaxed))
                 {

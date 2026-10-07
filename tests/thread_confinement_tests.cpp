@@ -86,6 +86,23 @@ int main() {
             own::detail::increment(count);
         });
     });
+    test::run("atomic reference saturation", [] {
+        // The last value below the threshold still increments normally.
+        std::atomic<std::size_t> below{own::detail::saturation_limit - 1};
+        own::detail::increment(below);
+        CHECK(below.load() == own::detail::saturation_limit);
+        expect_abort([] {
+            std::atomic<std::size_t> count{own::detail::saturation_limit};
+            own::detail::increment(count);
+        });
+    });
+    test::run("weak locking saturation", [] {
+        expect_abort([] {
+            own::detail::control_block block({}, {}, nullptr, nullptr);
+            block.strong.store(own::detail::saturation_limit);
+            (void)own::detail::try_add_strong(&block);
+        });
+    });
     test::run("atomic zero cannot resurrect", [] {
         expect_abort([] {
             std::atomic<std::size_t> count{0};

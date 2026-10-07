@@ -245,6 +245,8 @@ capacity behavior. See [allocation and retirement contracts](docs/design.md).
 make example
 # This target runs the current debug/release tests before comparing unique owners:
 make benchmark-unique
+# Reference-count contention at 1..N threads (QUICK=1 for a smoke test):
+make benchmark-scaling
 ```
 
 Requires an existing C++20 compiler with exceptions and a POSIX shell for the
@@ -259,6 +261,10 @@ compare equivalent retained-owner borrowing against std ownership plus raw/refer
 borrows, and separately measure independent owning copies. Historical data and
 fresh reruns of the previous revision are preserved. A borrowed view is not a
 faster substitute for an independent lifetime guarantee.
+[Contention scaling](docs/benchmark_scaling.md) measures shared-owner copies
+from 1 to N threads against `std::shared_ptr`, with private-object and weak-lock
+controls; the single-instruction increment cut four-thread copy/drop cost by
+about 40% on the measured VM.
 
 Windows/MSVC, Clang, macOS and other architectures are not yet validated. These
 are CPU simulations, not measured engine integration or actual GPU execution.
