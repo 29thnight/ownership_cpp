@@ -220,8 +220,9 @@ extend lifetime, and its temporary strong release can trigger retirement.
 
 A local-group allocation is completed before a `shared.localize()` reference
 increment or transfer. If allocation throws, the shared source remains unchanged.
-A failed local factory destroys its already-constructed payload and deallocates
-its control block; no hook runs for the unsuccessful factory result. A throwing
+Local factories allocate the control block, payload and first group together, so
+the only possible allocation failure happens before anything is constructed; no
+hook runs for an unsuccessful factory result. A throwing
 payload constructor returns its raw block storage to its original allocator.
 No-throw destructors are required by factory static assertions.
 
@@ -288,18 +289,23 @@ must not do so.
 Registration adds one external weak reference. During final payload destruction,
 the mixin's weak member is destroyed before the implicit weak reference is dropped;
 the block therefore cannot disappear underneath the destructor. Deferred tasks
-retain the implicit weak reference until payload destruction completes. A failed
-local-group allocation after successful payload construction follows the same
-safe cleanup path, with no user retirement hook installed for the failed factory.
+retain the implicit weak reference until payload destruction completes. Local
+factories have no allocation after payload construction and registration.
 
 ## Allocation and retirement contracts
 
 `make_unique` uses typed new/delete with only a pointer in its handle.
 `allocate_unique` uses a byte allocator and an explicitly stateful allocated owner.
-`make_shared` uses one coallocated payload/control allocation. Optional `make_local`
-still uses a second local-group allocation; no embedded group or lazy promotion
-optimization is part of this revision. Every nonempty `localize()` allocates a new
-group, even when another group already exists on the same thread.
+`make_shared` uses one coallocated payload/control allocation. `make_local` and
+`allocate_local(_with)` reserve their first local group inside that allocation:
+the group holds a strong reference, so its storage never outlives the block, and
+releasing it only ends the group object. Every further nonempty `localize()`
+creates a new group, even when another group already exists on the same thread.
+With the default allocator, each thread keeps the storage of one freed group and
+reuses it for its next `localize()`; groups are released on their creating
+thread, so the slot needs no synchronization. A thread-exit cleanup frees the
+slot, and groups released later during thread-exit destruction free their own
+storage. Custom allocators always receive every group allocation.
 
 An `allocator_ref` contains a context and byte allocate/deallocate callbacks.
 Return suitably aligned storage or throw; null becomes `std::bad_alloc`.
@@ -340,9 +346,10 @@ storage must remain valid until final release. No actual GPU operation is implie
 
 Local groups are useful when many local aliases amortize a group allocation and
 share/localize boundary costs. For a single transient owner, a global handle or a
-borrow under a clearly longer-lived lease may be simpler and faster. Resource
-pooling may help allocation-heavy localization, but pools must preserve alignment,
-context lifetime, and cross-thread deallocation requirements.
+borrow under a clearly longer-lived lease may be simpler and faster. Beyond the
+built-in one-slot cache, resource pooling may help allocation-heavy localization,
+but pools must preserve alignment, context lifetime, and cross-thread
+deallocation requirements.
 
 ## Validation scope
 

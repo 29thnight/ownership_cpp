@@ -274,6 +274,12 @@ namespace own
         inline void* allocate_bytes(allocator_ref allocator, std::size_t size,
                                     std::size_t alignment)
         {
+            // The default allocator is a known function: call it directly so it
+            // inlines into ::operator new, which never returns null.
+            if (allocator.allocate == default_allocate && allocator.deallocate)
+            {
+                return default_allocate(allocator.context, size, alignment);
+            }
             if (!allocator.allocate || !allocator.deallocate) { fail_fast(); }
             void* result = allocator.allocate(allocator.context, size, alignment);
             if (!result) { throw std::bad_alloc(); }
@@ -612,13 +618,13 @@ namespace own
         ~allocated_unique_owner() { reset(); }
         allocated_unique_owner& operator=(allocated_unique_owner&& other) noexcept
         {
-            allocated_unique_owner(std::move(other)).swap(*this);
+            move_assign(other);
             return *this;
         }
         template<class U> requires std::is_convertible_v<U*, T*>
         allocated_unique_owner& operator=(allocated_unique_owner<U>&& other) noexcept
         {
-            allocated_unique_owner(std::move(other)).swap(*this);
+            move_assign(other);
             return *this;
         }
         void reset() noexcept
@@ -679,6 +685,30 @@ namespace own
             : pointer_(pointer), storage_(storage), context_(allocator.context),
               deallocate_(allocator.deallocate), dispose_(dispose)
         {
+        }
+        // Same observable order as constructing a temporary and swapping: this
+        // handle holds the new object before the old one is disposed, so cleanup
+        // may reassign it. Avoids the temporary and swap's emptiness branches.
+        template<class U>
+        void move_assign(allocated_unique_owner<U>& other) noexcept
+        {
+            if constexpr (std::is_same_v<U, T>)
+            {
+                if (&other == this) { return; }
+            }
+            T* const previous = pointer_;
+            if (!previous)
+            {
+                take_from(other);
+                return;
+            }
+            void* const storage = storage_;
+            void* const context = context_;
+            const auto deallocate = deallocate_;
+            const auto dispose = dispose_;
+            pointer_ = nullptr;
+            take_from(other);
+            dispose(storage, context, deallocate);
         }
         template<class U>
         void take_from(allocated_unique_owner<U>& other) noexcept
