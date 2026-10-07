@@ -2,7 +2,7 @@
 
 [usamahz/cpu-performance-engineering](https://github.com/usamahz/cpu-performance-engineering)의
 원칙(측정 방법, 메모리 계층, 동시성, 컴파일러/코드 생성)을 이 라이브러리에
-적용한 결과입니다. 기준 시점은 `5761f18`(unique 소유권 문서화) 위의 작업 브랜치입니다.
+적용한 결과입니다. 기준 시점은 `5761f18`(unique 소유권 문서화) 위의 작업 브랜치이며, 3장에 P1~P7 진행 결과를 정리했습니다.
 
 ## 1. 적용한 원칙
 
@@ -48,73 +48,42 @@ weak lock)은 노이즈 범위 안에서 변하지 않았습니다. 0을 지나 
 - `.github/workflows/ci.yml`: GCC/Clang × debug/release/ASan/UBSan/TSan,
   모든 벤치마크 하네스의 `-Werror` 컴파일, 스케일링 벤치마크 QUICK 스모크, 예제 실행.
 
-## 3. 남은 개선점 (우선순위 순)
+## 3. 개선점 진행 결과
 
-각 항목에 근거, 예상 효과, 그리고 효과를 증명할 측정 방법을 적었습니다. 측정 전에는
-어떤 것도 개선이라고 주장하지 않는 것이 참고 저장소의 원칙입니다.
+모든 항목은 변경 전후 헤더를 같은 하네스로 두 번(primary/repeat) 측정했고, std를 두 번
+돌리는 A/A 대조군으로 노이즈 범위를 함께 확인했습니다. 결과 표와 원자료는 각 보고서에 있습니다.
 
-### P1. 공유 control block 헤더 축소 (메모리 계층)
+| 항목 | 결과 | 핵심 수치 | 보고서 |
+|---|---|---|---|
+| P1 control block 헤더 축소 | **적용** | 헤더 72B→24B, 16k 스캔 1.23→0.94ns, 256k 스캔 8.7→7.7ns | [layout](benchmark_layout.md) |
+| P4 `local_group` 축소 | **적용** | 48B→40B (쓰지 않는 allocate 콜백 제거) | [layout](benchmark_layout.md) |
+| P7 카운트 한 워드 패킹 (새로 발견) | **적용** | 헤더 24B→16B, `make_shared<8B>` 24B로 std와 동일, 공유되지 않는 객체 생성·소멸 21.8→17.9ns | [counts](benchmark_counts.md) |
+| P3 감소 연산 메모리 순서 | **적용** | Arm: `ldaddal`×2 → `ldaddl`+`ldar` (코드 생성으로 확인, Arm 실측은 없음) | [counts](benchmark_counts.md) |
+| P5 측정 인프라 | **적용** | `--pin 1` CPU 고정, std A/A 대조, 공통 7필드 메타데이터 스크립트 | 각 보고서 |
+| P6 null 비교 | **적용** | `owner == nullptr` 등 5개 타입. 핸들끼리 비교·순서 비교·weak 비교는 계속 금지 | README |
+| P2 `allocated_unique_owner` 16B | **측정만** (계약 유지) | vector 이동 −39~45%, 생성 −9%, 단일 move는 개선 없음, 할당 +33% | [allocated unique](allocated_unique_layout.md) |
 
-- **근거:** `detail::control_block`이 72바이트입니다(strong, weak, `allocator_ref` 3워드,
-  `retirement_hook` 2워드, `dispose`, `destroy`). 8바이트 payload의
-  `in_place_control`은 80바이트이고, libstdc++ `make_shared` 블록은 24바이트입니다.
-  glibc 청크 기준으로는 96바이트 대 32바이트라서, 작은 객체가 많은 경우 캐시와
-  메모리 사용량이 약 3배입니다.
-- **방안:** `dispose`/`destroy`는 타입별 정적 테이블 포인터 하나로 합칩니다(−8B).
-  기본 할당자와 hook이 없는 경우는 별도 블록 타입으로 분리해 해당 필드를 빼서,
-  목표 32~40바이트로 줄입니다. 사용자 지정 할당자나 retirement hook이 있을 때만
-  확장 블록을 씁니다.
-- **주의:** 지금은 헤더가 72바이트라서 payload가 항상 카운터와 다른 캐시 라인에서
-  시작합니다(우연한 이점). 헤더를 줄이면 카운터와 payload가 같은 라인을 공유해서,
-  다른 코어가 owner를 복사할 때 payload 읽기가 라인 이동 비용을 함께 냅니다
-  (참고 저장소 섹션 9의 false sharing). 메모리 이득과 경합 비용을 둘 다 측정해야 합니다.
-- **측정:** `create_read_destroy`, 4,096개 asset 스캔(캐시 상주 vs 비상주),
-  "한 스레드는 payload 읽기, 나머지는 owner 복사" 케이스를 헤더 크기별로 비교합니다.
+### 측정으로 드러난 트레이드오프
 
-### P2. `allocated_unique_owner`의 move 비용
+- **P1 헤더 축소 → 카운터와 payload가 같은 캐시 라인을 씀.** 다른 코어가 owner를 복사하는
+  동안 같은 객체를 읽는 스레드의 비용이 0.28ns에서 약 5ns로 늘었습니다. std도 같은 구조라
+  1.3~2.1ns를 냅니다. 이런 hot 객체는 payload를 `alignas(64)`로 선언하면 0.27ns로 돌아오며,
+  이 방법을 README와 design 문서에 적었습니다.
+- **P7은 두 가지 방식을 실측해서 비교.** libstdc++처럼 감소 전에 워드를 먼저 읽는 방식은
+  생성·소멸이 12.5ns로 std와 같아지지만, 경합 없는 복사가 24%, 경합 복사가 31~40%
+  느려졌습니다. 공유 소유권의 본업은 복사이므로 이 방식은 채택하지 않았습니다. 공유되지
+  않는 객체에는 원자 연산이 없는 `unique_owner`가 맞습니다.
+- **카운트 한계가 2^31로 바뀜.** 이전에는 2^63이었고, std(`int`)와 같은 수준입니다.
 
-- **근거:** 상위 커밋의 정밀 측정에서 move 1.548×, borrow/read 1.242×, vector 이동
-  1.140×(erased std40 대비)가 남았습니다. 핸들이 5워드(40B)라서 move할 때마다 5워드를
-  복사하고 원본을 비워야 합니다.
-- **방안:** 할당 앞부분에 정리 정보(context, deallocate, dispose, 저장소 오프셋)를 담는
-  헤더를 두고, 핸들은 `T*`와 헤더 포인터 2워드(16B)만 들고 있게 합니다. 할당 크기는
-  헤더만큼 늘어나지만, move·vector·큐 전달 비용은 기본 `unique_owner`에 가까워질
-  것으로 예상합니다.
-- **측정:** `benchmarks/precision`의 기존 A/A 대조를 포함한 설계로 move, vector, queue를 비교합니다.
+## 4. 남은 작업
 
-### P3. strong 감소의 메모리 순서 (Arm)
-
-- **근거:** 모든 감소가 `acq_rel`입니다. x86에서는 `lock xadd` 하나로 같지만, Arm에서는
-  `release` 감소 후 0에 도달했을 때만 acquire하는 형태가 더 쌉니다(참고 저장소
-  섹션 9의 C/C++11 매핑 표).
-- **방안:** `fetch_sub(1, release)`를 쓰고, 0에 도달한 경우에만 `load(acquire)`를 합니다.
-  펜스 대신 load를 쓰면 TSan과 호환됩니다.
-- **측정:** 이 VM(x86)에서는 효과를 볼 수 없습니다. Arm(Graviton 등) 측정 전까지는
-  변경을 보류합니다.
-
-### P4. `local_group` 별도 할당
-
-- **근거:** `make_local`은 할당이 2번(블록 + 48B 그룹)이고, `localize()`마다 1번씩 더
-  필요합니다. 이번 레이아웃 수정으로 release 빌드 그룹도 40B에서 48B가 됐습니다
-  (glibc 청크 48B에서 64B).
-- **방안:** 첫 그룹을 블록에 함께 배치하는 옵션을 두거나, `references`와 `thread_id`를
-  32비트로 줄여 40B로 복원하는 것을 검토합니다(한계에 도달하면 fail-fast).
-- **측정:** 기존 `4096_independent_localizations`, `create_local` 케이스.
-
-### P5. 측정 인프라 보강
-
-- 스케일링 벤치마크에 선택적 CPU 고정(`taskset`/`pthread_setaffinity_np`)과 A/A
-  대조(같은 구현 두 벌)를 추가합니다. 이번 데이터에서는 identical-code std의 4스레드
-  중앙값이 327~373ns로 움직였으므로, 경합 행에서 약 15% 미만의 차이는 입증되지 않습니다.
-- 지원되는 환경에서는 `perf stat`으로 cycles, `machine_clears.memory_ordering`,
-  HITM 계열 이벤트를 수집해 라인 이동이 원인이라는 것을 카운터로 확인합니다(이
-  VM에서는 PMU를 쓸 수 없음).
-- Arm(LSE 유무), MSVC, macOS에서의 재현.
-
-### P6. API 소소한 개선
-
-- `owner == nullptr` 비교 연산자가 없습니다(비교와 해시는 의도적으로 제외했다고
-  문서화됨). 최소한 null 비교 정도는 사용성 측면에서 검토할 만합니다.
-- `local_owner`의 스레드 오용은 release에서 검출되지 않는다는 점은 문서화되어 있습니다.
-  release에서도 켤 수 있는 저비용 검사 모드(생성 시 ID 저장은 이제 레이아웃상 공짜)를
-  고려할 수 있습니다.
+1. **`allocated_unique_owner` move 대입 최적화 (계약 유지).** 같은 40B인 std erased
+   `unique_ptr`보다 단일 move가 느립니다(2.1ns 대 1.8ns). 원인은 임시 객체 생성 후 분기가
+   많은 swap을 하는 구현입니다. 상위 커밋 기록상 이 타입의 최적화는 사용자 요청으로
+   중단된 상태라 손대지 않았습니다.
+2. **P2 결정.** 컨테이너로 한꺼번에 옮기는 작업이 실제로 지배적일 때만 헤더 방식(할당자
+   계약 변경)을 검토합니다.
+3. **공유되지 않는 shared 객체의 남은 6ns.** 마지막 strong 감소 한 번(locked RMW)이 남은
+   차이입니다. 복사 경로를 느리게 하지 않고 없앨 방법은 찾지 못했습니다.
+4. **다른 플랫폼 실측.** Arm(LSE 유무), MSVC, macOS, 그리고 PMU를 쓸 수 있는 환경에서
+   `perf stat`으로 라인 이동을 카운터로 확인하는 일.

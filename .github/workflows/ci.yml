@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compile every benchmark harness
         run: |
-          for source in benchmarks/ownership_bench.cpp benchmarks/unique_bench.cpp benchmarks/refcount_scaling.cpp benchmarks/control_block_layout.cpp; do
+          for source in benchmarks/ownership_bench.cpp benchmarks/unique_bench.cpp benchmarks/refcount_scaling.cpp benchmarks/control_block_layout.cpp benchmarks/allocated_unique_layout.cpp; do
             ${{ matrix.compiler }} -std=c++20 -O2 -DNDEBUG -pthread -Wall -Wextra -Wpedantic -Werror -Iinclude -c "$source" -o /dev/null
           done
       # Timing on shared CI runners is not evidence; this checks that the
@@ -51,12 +51,18 @@ jobs:
           CXX: ${{ matrix.compiler }}
           QUICK: "1"
           BENCH_OUTPUT: ${{ runner.temp }}/scaling
-        run: ./scripts/benchmark_scaling.sh
+        run: ./scripts/benchmark_scaling.sh --pin 1
       - name: Control-block layout smoke run
         env:
           CXX: ${{ matrix.compiler }}
           QUICK: "1"
           BENCH_OUTPUT: ${{ runner.temp }}/layout
-        run: ./scripts/benchmark_layout.sh
+        run: ./scripts/benchmark_layout.sh --pin 1
+      - name: Allocated unique layout smoke run
+        env:
+          CXX: ${{ matrix.compiler }}
+          QUICK: "1"
+          BENCH_OUTPUT: ${{ runner.temp }}/allocated_unique
+        run: ./scripts/benchmark_allocated_unique.sh
       - name: Examples
         run: make example CXX=${{ matrix.compiler }}
