@@ -2,6 +2,10 @@
 
 ## Primary vocabulary: own the scope, borrow the access
 
+Prefer `unique_owner<T>` when one movable owner can cover the required lifetime.
+It creates no reference count or shared control block. Use `shared_owner<T>` when
+multiple independent owners or weak observations are actually needed.
+
 `shared_owner<T>` provides an independent lifetime guarantee. Use it for stored
 ownership, async handoff, and a scope whose source owner might reset. There is no
 privileged original/root owner: every remaining strong reference has the same
@@ -40,6 +44,86 @@ A view itself has no thread-affinity check. Moving/copying it does not touch a
 local ownership group. Any cross-thread borrowed use requires an externally
 retained lifetime and correct publication/payload synchronization. Do not infer
 thread safety merely from its pointer-sized representation.
+
+## Pointer-only default exclusive ownership
+
+`unique_owner<T>` stores one `T*`, with typed deletion known at compile time.
+On the tested 64-bit ABI it is 8 bytes, the same as default standard unique
+ownership. There is no reference count, shared control block, erased callback,
+allocator context, or metadata allocation in this default type.
+
+`make_unique<T>` uses the ordinary `new T(args...)` expression. `delete T*` follows
+the matching language lookup rules, including class-specific allocation,
+deallocation, alignment and constructor-failure cleanup. The library does not
+allocate with a global byte callback and then accidentally delete through a
+class-specific function. The class's allocation functions must themselves obey
+C++ requirements. A class-specific nonthrowing allocation function that returns
+null yields an empty owner according to new-expression rules; byte-allocator
+null results in the separate allocated factory still throw `std::bad_alloc`.
+
+Moves transfer the pointer and empty the source. `reset()` exchanges it for null
+before invoking deletion, so reentrant reset observes empty ownership and can
+install a replacement. Move assignment first takes the source into a temporary,
+then swaps before disposing of the old target; this handles self-move and a source
+owner embedded in the old target's payload. Destruction directly deletes the
+stored pointer without clearing a handle whose own lifetime is ending. It does
+not promise that a callback observes an empty owner during owner destruction;
+that guarantee belongs to explicit `reset()`.
+
+The default may add safe const/volatile qualification without changing the delete
+type. An owning base conversion is allowed only when pointer conversion is public
+and unambiguous and the target has an accessible, `noexcept`, virtual destructor.
+Otherwise it would delete through a type that loses the original destruction
+contract. A non-virtual-base conversion must use a borrowed view while the derived
+owner remains alive. This rejects an unsafe standard-pointer usage rather than
+paying type-erasure costs in every default owner.
+
+The type must be complete when deletion/reset is instantiated. Forward declarations
+and declarations of owner-returning functions remain possible; an enclosing PIMPL
+class should define its destructor where its payload is complete. The default
+does not retain a destruction callback merely to permit incomplete-type cleanup.
+
+## Opt-in runtime allocator ownership
+
+`allocate_unique<T>(allocator_ref, args...)` returns
+`allocated_unique_owner<T>`, not `unique_owner<T>`. It retains the original
+concrete type's disposal callback, original allocation address, adjusted access
+pointer, allocator context and deallocator. These five data/function-pointer
+fields occupy 40 bytes on the tested ABI. The object itself is one allocation
+of exactly `sizeof(T)`/`alignof(T)` through the allocator; no metadata/control block
+is separately allocated and no reference count exists.
+
+This path constructs through `::new (storage) T(...)`, bypassing class-specific
+storage allocation. It explicitly destroys the concrete payload and calls the
+same allocator's deallocator, never a class-specific `operator delete`. Therefore
+its erased state can safely retain most-derived destruction after public,
+unambiguous non-virtual, multiple or virtual base conversion. Constructor failure
+returns storage to the allocator; null allocation throws `std::bad_alloc`.
+
+The callback/context are non-owning and must remain valid until disposal on the
+eventual releasing thread. The access pointer alone indicates ownership; cleanup
+metadata is meaningful only while that pointer is non-null. Moves null the source
+access pointer. Empty move, swap and reset paths never read inactive metadata,
+which may outlive its original allocation or allocator context. Reset snapshots
+cleanup, makes ownership observably empty before invoking user code, then performs
+exactly one destruction/deallocation without touching the handle afterward. Empty handles can be used with incomplete payload types because populated
+cleanup was established by a factory where the concrete type was complete.
+
+The default and allocated types do not implicitly convert to each other. This
+prevents silently losing a deallocation contract or putting allocator state back
+into the pointer-sized default. Use borrowed access when a consumer only needs
+access rather than owning a particular allocation policy.
+
+Neither form exposes copying, `release`, raw/reference adoption, pointer reset,
+public aliasing, arbitrary deleters, arrays, fancy pointers, allocator traits,
+retirement hooks or automatic shared promotion. Both may move between synchronized
+threads; mutation of one handle concurrently remains invalid. A view survives an
+ownership move only if the receiving owner continues to retain the same payload.
+Reset, replacement and final destruction can invalidate it.
+
+The `enable_owner_from_this` mixin stays unbound under both unique factories;
+even its from-this view helpers return empty. Borrow from the owning handle.
+Creating a second unique owner from `this` would violate exclusivity.
 
 ## Optional two-level strong ownership
 
@@ -108,7 +192,7 @@ There is no guarantee across unloadable/reloadable dynamic-library boundaries.
 ## Ownership from this
 
 `enable_owner_from_this<T>` contains one weak registration and an empty marker
-base. It never owns the object. Factories finish construction before binding this
+base. It never owns the object. Shared/local factories finish construction before binding this
 registration to their existing control block and the appropriately adjusted `T*`.
 No raw `this` adoption or second control block is possible through the public API.
 Binding is initialization, not a concurrent registration protocol: do not publish
@@ -160,6 +244,8 @@ safe cleanup path, with no user retirement hook installed for the failed factory
 
 ## Allocation and retirement contracts
 
+`make_unique` uses typed new/delete with only a pointer in its handle.
+`allocate_unique` uses a byte allocator and an explicitly stateful allocated owner.
 `make_shared` uses one coallocated payload/control allocation. Optional `make_local`
 still uses a second local-group allocation; no embedded group or lazy promotion
 optimization is part of this revision. Every nonempty `localize()` allocates a new

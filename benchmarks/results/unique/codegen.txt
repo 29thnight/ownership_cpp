@@ -1,0 +1,76 @@
+BUILD frozen_erased
+bench_unobserved_own_moves:
+  +00: mov    (%rdi),%rax
+  +03: mov    (%rax),%rax
+  +06: ret
+  +07: nopw   0x0(%rax,%rax,1)
+
+bench_unobserved_std_moves:
+  +00: mov    (%rdi),%rax
+  +03: mov    (%rax),%rax
+  +06: ret
+  +07: nopw   0x0(%rax,%rax,1)
+
+BUILD lean
+bench_unobserved_own_moves:
+  +00: mov    (%rdi),%rax
+  +03: mov    (%rax),%rax
+  +06: ret
+  +07: nopw   0x0(%rax,%rax,1)
+
+bench_unobserved_std_moves:
+  +00: mov    (%rdi),%rax
+  +03: mov    (%rax),%rax
+  +06: ret
+  +07: nopw   0x0(%rax,%rax,1)
+
+SUPPLEMENTAL INSPECTION: borrow loops in the same final lean timed binary
+Extracted after timing; instruction sequences match, code addresses/alignment differ.
+
+std_default borrow_read_loop (original address 0000000000007840):
+    7840:	mov    (%rdi),%rax
+    7843:	xor    %edx,%edx
+    7845:	mov    0x18(%rax),%rdi
+    7849:	mov    (%rax),%r8
+    784c:	test   %rdi,%rdi
+    784f:	je     787f <function+0x3f>
+    7851:	xor    %eax,%eax
+    7853:	lea    -0x8(%rsp),%r9
+    7858:	nopl   0x0(%rax,%rax,1)
+    7860:	mov    (%r8),%rcx
+    7863:	mov    %rcx,-0x8(%rsp)
+    7868:	mov    -0x8(%rsp),%rcx
+    786d:	mov    %rax,%rsi
+    7870:	inc    %rax
+    7873:	and    $0x7,%esi
+    7876:	add    (%rcx,%rsi,8),%rdx
+    787a:	cmp    %rax,%rdi
+    787d:	jne    7860 <function+0x20>
+    787f:	mov    %rdx,%rax
+    7882:	ret
+    7883:	cs nopw 0x0(%rax,%rax,1)
+    788d:	nopl   (%rax)
+
+own_unique borrow_read_loop (original address 00000000000079d0):
+    79d0:	mov    (%rdi),%rax
+    79d3:	xor    %edx,%edx
+    79d5:	mov    0x18(%rax),%rdi
+    79d9:	mov    (%rax),%r8
+    79dc:	test   %rdi,%rdi
+    79df:	je     7a0f <function+0x3f>
+    79e1:	xor    %eax,%eax
+    79e3:	lea    -0x8(%rsp),%r9
+    79e8:	nopl   0x0(%rax,%rax,1)
+    79f0:	mov    (%r8),%rcx
+    79f3:	mov    %rcx,-0x8(%rsp)
+    79f8:	mov    -0x8(%rsp),%rcx
+    79fd:	mov    %rax,%rsi
+    7a00:	inc    %rax
+    7a03:	and    $0x7,%esi
+    7a06:	add    (%rcx,%rsi,8),%rdx
+    7a0a:	cmp    %rax,%rdi
+    7a0d:	jne    79f0 <function+0x20>
+    7a0f:	mov    %rdx,%rax
+    7a12:	ret
+    7a13:	cs nopw 0x0(%rax,%rax,1)
+    7a1d:	nopl   (%rax)
