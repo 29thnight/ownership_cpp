@@ -270,7 +270,9 @@ faster substitute for an independent lifetime guarantee.
 from 1 to N threads against `std::shared_ptr`, with private-object and weak-lock
 controls; the single-instruction increment cut four-thread copy/drop cost by
 about 40% on the measured VM. The [performance review](docs/performance_review.md)
-lists the remaining measured costs and planned improvements.
+lists the remaining measured costs and planned improvements, and the
+[optimization round](docs/optimization_round.md) records the latest before/after
+comparison across every harness.
 
 Clang 18 on Linux x86-64 passes the debug and release suites; the CI workflow
 (`.github/workflows/ci.yml`) also runs every sanitizer mode with GCC and Clang and
