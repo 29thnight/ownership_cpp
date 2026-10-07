@@ -1,0 +1,4 @@
+ASan+UBSan final-source smoke: PASS
+Debug thread checks: enabled (NDEBUG not defined)
+ASAN_OPTIONS=detect_leaks=0
+LeakSanitizer runtime unavailable: an earlier detect_leaks=1 run failed under ptrace; leak detection was not validated by LSan.

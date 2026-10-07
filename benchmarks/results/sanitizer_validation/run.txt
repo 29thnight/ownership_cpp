@@ -1,0 +1,9 @@
+samples=3
+warmups=1
+iterations=1000
+shuffle_seed=12648430
+thread_activation=created_and_joined_before_timing
+clock=steady_clock
+tail_definition=nearest_rank_across_batch_normalized_samples
+observable_checksum=161653504
+glibc_single_threaded=0
