@@ -12,6 +12,11 @@ three (two counts and a pointer to a static operations table). `make_shared` and
 `*_with` factories use an extended block. Local groups dropped the unused allocate
 callback (48 to 40 bytes).
 
+*Later revision:* packing both counts into one word took the compact block to 24
+bytes (glibc chunk 32), the same as libstdc++; see
+[the count-layout report](benchmark_counts.md). The measurements below are for the
+32-byte compact block.
+
 | Per `make_shared<8-byte payload>` | Requested bytes | glibc chunk |
 |---|---:|---:|
 | Previous layout | 80 | 96 |

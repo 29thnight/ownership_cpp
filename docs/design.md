@@ -127,13 +127,14 @@ Creating a second unique owner from `this` would violate exclusivity.
 
 ## Optional two-level strong ownership
 
-A coallocated control block starts with a three-word header: atomic `strong` and
-`weak` counters and a pointer to a static per-type operations table (dispose,
-destroy, and where the retirement hook lives). `make_shared` and `make_local` use a
-compact block, header plus payload, with the default allocator and no hook: 32
-bytes for an 8-byte payload, against 80 bytes before this layout. Factories that
+A coallocated control block starts with a two-word header: one atomic word
+holding the strong and weak counts and a pointer to a static per-type operations
+table (dispose, destroy, and where the retirement hook lives). `make_shared` and
+`make_local` use a compact block, header plus payload, with the default allocator
+and no hook: 24 bytes for an 8-byte payload, the same as libstdc++, against 80
+bytes before these layout changes. Factories that
 take an allocator or a hook (`allocate_*`, `*_with`) use an extended block that
-also stores the allocator context, its deallocation callback and the hook (64
+also stores the allocator context, its deallocation callback and the hook (56
 bytes for an 8-byte payload). The allocate callback is not stored: nothing calls
 it after the block exists. Every shared owner contributes one strong reference. A
 local group contributes one strong reference and holds a thread-confined,
@@ -152,13 +153,16 @@ conversion preserves ownership of the original concrete allocation. Multiple
 local groups may exist on the same thread or different threads: locality is an
 explicit scope, not an implicit map keyed by thread identity.
 
-Strong and weak increments by a holder of an existing reference use one relaxed
-`fetch_add` and check the previous value afterward: zero (a use after release) or
-a value at or above `saturation_limit` (half the counter range) aborts. A racing
-increment that has not yet observed the threshold has the other half of the range
-as headroom, so the counter cannot wrap through zero and resurrect a retired
-block. Weak locking still uses a compare/exchange loop because it must not
-increment a zero count; it aborts at the same threshold.
+Both counts live in one 64-bit word: strong in the low 32 bits, weak in the high
+32 bits. Increments by a holder of an existing reference use one relaxed
+`fetch_add` on that word and check the previous value of their half afterward:
+zero (a use after release) or a value at or above `saturation_limit` (2^31)
+aborts. The other 2^31 values of each half are headroom for racing increments
+that have not yet observed the threshold, so a half can neither wrap through
+zero and resurrect a retired block nor carry into the other half. The standard
+library also limits counts to 32 bits. Weak locking uses a compare/exchange loop
+on the word because it must not increment a zero strong count; it aborts at the
+same threshold.
 
 Earlier revisions used a compare/exchange loop for every increment. Under
 contention that loop needs extra transfers of the control-block line: on a
@@ -168,12 +172,26 @@ below `std::shared_ptr`'s 373.4/342.5 ns in the same runs. Uncontended copies an
 weak locking were unchanged. See
 [the scaling report](benchmark_scaling.md) for the full method and data.
 
-Strong decrements use acquire/release atomics. The thread observing the final
-reference sees prior releases and dispatches disposal. Weak locking uses a CAS
-with acquire on success and succeeds only while the strong count is nonzero.
-Reads of zero never change it. Relaxed count queries are advisory snapshots only.
-No reference-count operation substitutes for publishing a handle safely or for
-synchronizing accesses to the payload.
+A strong decrement is a `release` `fetch_sub`. Only the thread that observes the
+last strong reference performs an acquire load before disposal, so other
+decrements do not pay for acquire ordering (on Arm, `ldaddl` instead of
+`ldaddal`; on x86 both are one `lock xadd`). An acquire load rather than a fence
+keeps ThreadSanitizer able to model the ordering. If no weak observer existed at
+the last strong release, none can be created afterward, because creating one
+needs a strong or weak reference; the weak release then sees exactly `weak_one`
+and frees the block without a second read-modify-write. Weak releases otherwise
+use acquire/release. Weak locking uses a CAS with acquire on success and
+succeeds only while the strong count is nonzero. Reads of zero never change it.
+Relaxed count queries are advisory snapshots only. No reference-count operation
+substitutes for publishing a handle safely or for synchronizing accesses to the
+payload.
+
+The last release deliberately does not load the word before decrementing to skip
+both read-modify-writes when the object was never shared, as libstdc++ does.
+Measured, that load made creating and destroying a never-shared object as cheap
+as the standard library but cost 24% on uncontended copies and 31-40% on
+contended ones, the operations shared ownership exists for. A never-shared
+object is better owned by `unique_owner`. See [the count-layout report](benchmark_counts.md).
 
 ## Weak and deferred lifetime
 

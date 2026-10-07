@@ -4,6 +4,7 @@
 // Copyright (c) 2026 29thnight. Licensed under the MIT License; see LICENSE.
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <new>
 #include <type_traits>
@@ -93,7 +94,7 @@ namespace own
         struct owner_registration_marker {};
         struct control_block;
         struct owner_access;
-        void release_strong(control_block*) noexcept;
+        void last_strong_released(control_block*) noexcept;
     }
 
     // A non-owning byte allocator. Its context must outlive all allocations,
@@ -141,26 +142,13 @@ namespace own
     private:
         explicit retirement_task(detail::control_block* block) noexcept : block_(block) {}
         detail::control_block* block_ = nullptr;
-        friend void detail::release_strong(detail::control_block*) noexcept;
+        friend void detail::last_strong_released(detail::control_block*) noexcept;
     };
 
     namespace detail
     {
+        // Non-atomic counts (local alias counts, thread IDs) use the full range.
         inline constexpr std::size_t count_limit = static_cast<std::size_t>(-1);
-        // Shared counts abort at half the range. The other half is headroom for
-        // increments already in flight when one thread reaches the threshold.
-        inline constexpr std::size_t saturation_limit = count_limit / 2;
-
-        // One locked add instead of a load + compare-exchange retry loop, which
-        // costs extra round trips of the contended line. Every caller already
-        // holds a reference, so a previous value of zero is a use-after-release
-        // bug, and reaching the threshold aborts. Wrapping through zero would need
-        // more than saturation_limit concurrent unobserved increments.
-        inline void increment(std::atomic<std::size_t>& count) noexcept
-        {
-            const auto previous = count.fetch_add(1, std::memory_order_relaxed);
-            if (previous == 0 || previous >= saturation_limit) [[unlikely]] { fail_fast(); }
-        }
 
         using deallocate_function = void (*)(void*, void*, std::size_t, std::size_t) noexcept;
 
@@ -174,47 +162,107 @@ namespace own
             retirement_hook* (*retirement)(control_block*) noexcept;
         };
 
-        // The common header: 3 words. Allocator and retirement state live only
+        // Both reference counts share one 64-bit word: strong in the low half,
+        // weak in the high half. One load then shows the last owner whether any
+        // other reference exists, so a never-shared object is destroyed without
+        // a locked read-modify-write.
+        using count_word = std::uint64_t;
+        inline constexpr count_word strong_one = 1;
+        inline constexpr count_word weak_one = count_word{1} << 32;
+        inline constexpr count_word strong_mask = weak_one - 1;
+        // Each half aborts at 2^31. The other 2^31 values of that half absorb
+        // increments already in flight, so a count can neither wrap through zero
+        // nor carry into the other half.
+        inline constexpr count_word saturation_limit = count_word{1} << 31;
+        inline constexpr count_word unique_counts = strong_one | weak_one;
+
+        inline constexpr std::size_t strong_of(count_word counts) noexcept
+        {
+            return static_cast<std::size_t>(counts & strong_mask);
+        }
+        inline constexpr std::size_t weak_of(count_word counts) noexcept
+        {
+            return static_cast<std::size_t>(counts >> 32);
+        }
+
+        // The common header: 2 words. Allocator and retirement state live only
         // in the extended block used by allocate_* and *_with factories.
         struct control_block
         {
-            std::atomic<std::size_t> strong{1};
             // One implicit weak reference covers the entire live or retired
             // object lifetime, plus one per external weak_owner.
-            std::atomic<std::size_t> weak{1};
+            std::atomic<count_word> counts{unique_counts};
             const control_ops* ops;
 
             explicit control_block(const control_ops* operations) noexcept : ops(operations) {}
+            std::size_t use_count() const noexcept
+            {
+                return strong_of(counts.load(std::memory_order_relaxed));
+            }
         };
+
+        // One locked add rather than a compare-exchange loop, which costs extra
+        // transfers of a contended line. Every caller already holds a reference
+        // of the kind it adds (or a strong one, for weak), so a previous count of
+        // zero is a use-after-release bug.
+        inline void add_strong(control_block* block) noexcept
+        {
+            const auto previous = strong_of(block->counts.fetch_add(strong_one, std::memory_order_relaxed));
+            if (previous == 0 || previous >= saturation_limit) [[unlikely]] { fail_fast(); }
+        }
+        inline void add_weak(control_block* block) noexcept
+        {
+            const auto previous = weak_of(block->counts.fetch_add(weak_one, std::memory_order_relaxed));
+            if (previous == 0 || previous >= saturation_limit) [[unlikely]] { fail_fast(); }
+        }
 
         inline void release_weak(control_block* block) noexcept
         {
-            if (block->weak.fetch_sub(1, std::memory_order_acq_rel) == 1)
+            // No strong reference and only the caller's weak one: nothing else
+            // can reach the block, so it needs no read-modify-write. This load
+            // is cheap where it matters: right after the last strong release,
+            // which already holds the line.
+            if (block->counts.load(std::memory_order_acquire) == weak_one ||
+                weak_of(block->counts.fetch_sub(weak_one, std::memory_order_acq_rel)) == 1)
             {
                 block->ops->destroy(block);
             }
         }
 
+        inline void last_strong_released(control_block* block) noexcept
+        {
+            // Zero is permanent. Keeping the implicit weak alive permits
+            // deferred destruction without successful weak locking.
+            retirement_hook hook;
+            if (auto* hook_of = block->ops->retirement) { hook = *hook_of(block); }
+            retirement_task task(block);
+            if (hook.retire) { hook.retire(hook.context, std::move(task)); }
+        }
+
         inline void release_strong(control_block* block) noexcept
         {
-            if (block->strong.fetch_sub(1, std::memory_order_acq_rel) == 1)
+            // No load before the decrement: on a line other cores are also
+            // updating, a separate load costs another transfer of the line.
+            // Release publishes this owner's accesses; only the thread dropping
+            // the last reference needs acquire. A load rather than a fence keeps
+            // ThreadSanitizer able to model the ordering.
+            if (strong_of(block->counts.fetch_sub(strong_one, std::memory_order_release)) == 1)
             {
-                // Zero is permanent. Keeping the implicit weak alive permits
-                // deferred destruction without successful weak locking.
-                retirement_hook hook;
-                if (auto* hook_of = block->ops->retirement) { hook = *hook_of(block); }
-                retirement_task task(block);
-                if (hook.retire) { hook.retire(hook.context, std::move(task)); }
+                (void)block->counts.load(std::memory_order_acquire);
+                // If no weak observer existed, none can appear now that strong
+                // is zero: release_weak then sees weak_one and frees the block
+                // without a second read-modify-write.
+                last_strong_released(block);
             }
         }
 
         inline bool try_add_strong(control_block* block) noexcept
         {
-            auto value = block->strong.load(std::memory_order_relaxed);
-            while (value != 0)
+            auto value = block->counts.load(std::memory_order_relaxed);
+            while (strong_of(value) != 0)
             {
-                if (value >= saturation_limit) { fail_fast(); }
-                if (block->strong.compare_exchange_weak(value, value + 1,
+                if (strong_of(value) >= saturation_limit) { fail_fast(); }
+                if (block->counts.compare_exchange_weak(value, value + strong_one,
                         std::memory_order_acquire, std::memory_order_relaxed))
                 {
                     return true;
@@ -589,13 +637,13 @@ namespace own
         shared_owner(const shared_owner& other) noexcept
             : block_(other.block_), pointer_(other.pointer_)
         {
-            if (block_) { detail::increment(block_->strong); }
+            if (block_) { detail::add_strong(block_); }
         }
         template<class U> requires std::is_convertible_v<U*, T*>
         shared_owner(const shared_owner<U>& other) noexcept
             : block_(other.block_), pointer_(other.pointer_)
         {
-            if (block_) { detail::increment(block_->strong); }
+            if (block_) { detail::add_strong(block_); }
         }
         shared_owner(shared_owner&& other) noexcept
             : block_(std::exchange(other.block_, nullptr)),
@@ -649,7 +697,7 @@ namespace own
         T* operator->() const noexcept { return pointer_; }
         std::size_t use_count() const noexcept
         {
-            return block_ ? block_->strong.load(std::memory_order_relaxed) : 0;
+            return block_ ? block_->use_count() : 0;
         }
         [[nodiscard]] local_owner<T> localize(allocator_ref allocator = {}) const &;
         [[nodiscard]] local_owner<T> localize(allocator_ref allocator = {}) &&;
@@ -747,7 +795,7 @@ namespace own
         std::size_t use_count() const noexcept
         {
             check_thread();
-            return group_ ? group_->block->strong.load(std::memory_order_relaxed) : 0;
+            return group_ ? group_->block->use_count() : 0;
         }
         std::size_t local_use_count() const noexcept
         {
@@ -758,7 +806,7 @@ namespace own
         {
             check_thread();
             if (!group_) { return {}; }
-            detail::increment(group_->block->strong);
+            detail::add_strong(group_->block);
             return shared_owner<T>(group_->block, pointer_);
         }
 
@@ -782,7 +830,7 @@ namespace own
         if (!block_) { return {}; }
         // Allocate first. Failure leaves this owner and its count unchanged.
         auto* group = detail::new_group(block_, allocator);
-        detail::increment(block_->strong);
+        detail::add_strong(block_);
         return local_owner<T>(group, pointer_);
     }
 
@@ -806,7 +854,7 @@ namespace own
         weak_owner(const weak_owner& other) noexcept
             : block_(other.block_), pointer_(other.pointer_)
         {
-            if (block_) { detail::increment(block_->weak); }
+            if (block_) { detail::add_weak(block_); }
         }
         template<class U> requires std::is_convertible_v<U*, T*>
         weak_owner(const weak_owner<U>& other) noexcept
@@ -814,7 +862,7 @@ namespace own
         {
             if (block_)
             {
-                detail::increment(block_->weak);
+                detail::add_weak(block_);
                 // Derived-to-virtual-base adjustment can read the object.
                 // Never adjust an expired pointer, even though its storage
                 // remains allocated for the weak control block.
@@ -840,7 +888,7 @@ namespace own
         weak_owner(const shared_owner<U>& other) noexcept
             : block_(other.block_), pointer_(other.pointer_)
         {
-            if (block_) { detail::increment(block_->weak); }
+            if (block_) { detail::add_weak(block_); }
         }
         template<class U> requires std::is_convertible_v<U*, T*>
         weak_owner(const local_owner<U>& other) noexcept
@@ -850,7 +898,7 @@ namespace own
             {
                 block_ = other.group_->block;
                 pointer_ = other.pointer_;
-                detail::increment(block_->weak);
+                detail::add_weak(block_);
             }
         }
         ~weak_owner() { if (block_) { detail::release_weak(block_); } }
@@ -896,7 +944,7 @@ namespace own
         }
         std::size_t use_count() const noexcept
         {
-            return block_ ? block_->strong.load(std::memory_order_relaxed) : 0;
+            return block_ ? block_->use_count() : 0;
         }
         bool expired() const noexcept { return use_count() == 0; }
         [[nodiscard]] shared_owner<T> lock() const noexcept
@@ -967,7 +1015,7 @@ namespace own
             // accessors expose only const ownership/views, as expected.
             weak_.pointer_ = const_cast<std::remove_cv_t<U>*>(object);
             weak_.block_ = block;
-            detail::increment(block->weak);
+            detail::add_weak(block);
         }
         friend struct detail::owner_access;
     };

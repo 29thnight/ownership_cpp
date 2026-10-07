@@ -21,6 +21,8 @@
 #include <fstream>
 #include <functional>
 #include <malloc.h>
+#include <pthread.h>
+#include <sched.h>
 #include <memory>
 #include <random>
 #include <stdexcept>
@@ -58,6 +60,28 @@ struct std_ops {
     using owner = std::shared_ptr<payload>;
     static owner make(std::uint64_t v) { return std::make_shared<payload>(v); }
 };
+
+// --pin 1: the reader (and every single-threaded case) runs on the first
+// allowed CPU and copier c on the (c+1)-th, so no two share a core.
+bool pin_threads = false;
+void pin_current_thread(std::size_t index) {
+    if (!pin_threads) return;
+    // Read the process's CPUs once, before any thread narrows its own
+    // affinity: threads inherit the creating thread's mask.
+    static const std::vector<int> cpus = [] {
+        cpu_set_t allowed;
+        CPU_ZERO(&allowed);
+        if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0) throw std::runtime_error("sched_getaffinity");
+        std::vector<int> list;
+        for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) if (CPU_ISSET(cpu, &allowed)) list.push_back(cpu);
+        return list;
+    }();
+    cpu_set_t target;
+    CPU_ZERO(&target);
+    CPU_SET(cpus[index % cpus.size()], &target);
+    if (pthread_setaffinity_np(pthread_self(), sizeof(target), &target) != 0)
+        throw std::runtime_error("pthread_setaffinity_np");
+}
 
 double elapsed_ns(clock_type::time_point start) {
     return std::chrono::duration<double, std::nano>(clock_type::now() - start).count();
@@ -109,10 +133,11 @@ double reader_with_copiers_on(const Owner& root, std::size_t copiers, std::size_
     std::vector<std::thread> threads;
     for (std::size_t c = 0; c < copiers; ++c) {
         threads.emplace_back([&, c] {
+            pin_current_thread(c + 1);
             std::size_t local = 0;
             while (!stop.load(std::memory_order_relaxed)) {
-                for (int i = 0; i < 64; ++i) { auto copy = root; escape(copy); }
-                local += 64;
+                for (int i = 0; i < 8; ++i) { auto copy = root; escape(copy); }
+                local += 8;
                 counters[c].copies.store(local, std::memory_order_relaxed);
             }
         });
@@ -210,9 +235,11 @@ int main(int argc, char** argv) try {
     const std::size_t warmups = arg(argc, argv, "--warmups", 2);
     const std::size_t scale = arg(argc, argv, "--scale", 1); // QUICK divides work
     const std::string output = arg_text(argc, argv, "--output", "");
+    pin_threads = arg(argc, argv, "--pin", 0) != 0;
+    pin_current_thread(0);
     const std::size_t hardware = std::max(2u, std::thread::hardware_concurrency());
     const std::size_t copiers = std::min<std::size_t>(3, hardware - 1);
-    const std::size_t create_n = 400000 / scale, reads = 2000000 / scale;
+    const std::size_t create_n = 400000 / scale, reads = std::max<std::size_t>(2000000 / scale, 500000);
 
     std::ofstream sizes;
     if (!output.empty()) sizes.open(output + "/sizes.csv");
@@ -267,7 +294,8 @@ int main(int argc, char** argv) try {
                     << mn << ',' << p90 << ',' << cv << '\n';
         }
     }
-    std::printf("samples=%zu warmups=%zu scale=%zu copiers=%zu\n", samples, warmups, scale, copiers);
+    std::printf("samples=%zu warmups=%zu scale=%zu copiers=%zu pinned=%d\n", samples, warmups, scale, copiers,
+                pin_threads ? 1 : 0);
     std::printf("verification: every sample matched its checksum\n");
     return 0;
 } catch (const std::exception& error) {

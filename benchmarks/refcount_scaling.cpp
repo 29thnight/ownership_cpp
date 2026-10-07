@@ -6,6 +6,8 @@
 // versus a load + compare-exchange retry loop) matters most when several cores
 // contend for the line. Private per-thread objects are the no-contention control,
 // and weak locking (a compare-exchange in both libraries) is the CAS control.
+// std runs twice (std_shared, std_shared_b) as an A/A control; --pin 1 pins
+// worker t to CPU t.
 //
 // Method: each sample starts every participating thread on a shared flag, each
 // thread performs `iterations` copy+drop (or lock+drop) pairs, and the sample is
@@ -28,6 +30,10 @@
 #include <functional>
 #include <memory>
 #include <random>
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -83,6 +89,34 @@ template<class Weak>
     return sum;
 }
 
+// --pin: worker t runs only on online CPU t (mod CPU count). Without it the
+// scheduler may migrate workers or stack two on one core mid-sample.
+bool pin_threads = false;
+
+void pin_current_thread(std::size_t index) {
+#if defined(__linux__)
+    if (!pin_threads) return;
+    // Read the process's CPUs once, before any thread narrows its own
+    // affinity: threads inherit the creating thread's mask.
+    static const std::vector<int> cpus = [] {
+        cpu_set_t allowed;
+        CPU_ZERO(&allowed);
+        if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0) throw std::runtime_error("sched_getaffinity");
+        std::vector<int> list;
+        for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) if (CPU_ISSET(cpu, &allowed)) list.push_back(cpu);
+        return list;
+    }();
+    cpu_set_t target;
+    CPU_ZERO(&target);
+    CPU_SET(cpus[index % cpus.size()], &target);
+    if (pthread_setaffinity_np(pthread_self(), sizeof(target), &target) != 0)
+        throw std::runtime_error("pthread_setaffinity_np");
+#else
+    if (pin_threads) throw std::runtime_error("--pin is only implemented on Linux");
+    (void)index;
+#endif
+}
+
 // Runs body(thread_index) on `threads` threads released together; returns the
 // slowest thread's elapsed nanoseconds. Thread creation is outside the timing.
 double run_parallel(std::size_t threads, const std::function<std::uint64_t(std::size_t)>& body,
@@ -95,6 +129,7 @@ double run_parallel(std::size_t threads, const std::function<std::uint64_t(std::
     workers.reserve(threads);
     for (std::size_t t = 0; t < threads; ++t) {
         workers.emplace_back([&, t] {
+            pin_current_thread(t);
             ready.fetch_add(1, std::memory_order_acq_rel);
             while (!go.load(std::memory_order_acquire)) {}
             auto start = clock_type::now();
@@ -173,6 +208,7 @@ int main(int argc, char** argv) try {
     const std::size_t hardware = std::max(1u, std::thread::hardware_concurrency());
     const std::size_t max_threads = arg(argc, argv, "--max-threads", hardware);
     const std::string output = arg_text(argc, argv, "--output", "");
+    pin_threads = arg(argc, argv, "--pin", 0) != 0;
     if (samples == 0 || iterations == 0) throw std::runtime_error("samples and iterations must be positive");
 
     std::vector<std::size_t> thread_counts;
@@ -181,7 +217,10 @@ int main(int argc, char** argv) try {
 
     std::vector<sample_case> cases;
     for (auto threads : thread_counts) {
+        // Two identical std copies form an A/A control: their difference shows
+        // how much run-to-run noise the comparison has to exceed.
         add_cases<std_ops>(cases, "std_shared", threads);
+        add_cases<std_ops>(cases, "std_shared_b", threads);
         add_cases<own_ops>(cases, "own_shared", threads);
     }
 
@@ -222,7 +261,8 @@ int main(int argc, char** argv) try {
                     << iterations << ',' << median << ',' << minimum << ',' << p90 << ',' << cv << '\n';
         }
     }
-    std::printf("samples=%zu warmups=%zu iterations=%zu thread_counts=", samples, warmups, iterations);
+    std::printf("samples=%zu warmups=%zu iterations=%zu pinned=%d thread_counts=", samples, warmups, iterations,
+                pin_threads ? 1 : 0);
     for (std::size_t i = 0; i < thread_counts.size(); ++i) std::printf("%s%zu", i ? "," : "", thread_counts[i]);
     std::printf("\nverification: every sample matched its payload checksum and returned the count to one\n");
     return 0;

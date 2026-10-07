@@ -23,7 +23,7 @@ mkdir -p benchmarks/.build "$output"
 binary="benchmarks/.build/refcount_scaling"
 "$CXX" "${flags[@]}" -I"$include" benchmarks/refcount_scaling.cpp -o "$binary"
 scripts/bench_metadata.sh "$CXX" "$include" benchmarks/refcount_scaling.cpp \
-    "copy+drop of a shared owner (shared line), per-thread private owners, weak lock+drop; no pinning unless --pin" \
+    "copy+drop of a shared owner (shared line), per-thread private owners, weak lock+drop; pinned only with --pin 1" \
     "${args[*]:-defaults}" "${flags[@]}" > "$output/metadata.txt"
 "$binary" --output "$output" "${args[@]}" | tee "$output/console.txt"
 (cd "$output" && sha256sum console.txt metadata.txt raw.csv summary.csv > SHA256SUMS)

@@ -80,40 +80,59 @@ int main() {
     });
     // White-box tests for unreachable-in-practice overflow states. These only
     // exercise counter helpers; real handles never have their state corrupted.
-    test::run("atomic reference overflow", [] {
+    test::run("strong reference saturation", [] {
+        using namespace own::detail;
+        // The last value below the threshold still increments, without
+        // touching the weak half.
+        control_block below(nullptr);
+        below.counts.store(weak_one | (saturation_limit - 1));
+        add_strong(&below);
+        CHECK(below.use_count() == saturation_limit && weak_of(below.counts.load()) == 1);
         expect_abort([] {
-            std::atomic<std::size_t> count{own::detail::count_limit};
-            own::detail::increment(count);
+            control_block block(nullptr);
+            block.counts.store(weak_one | saturation_limit);
+            add_strong(&block);
+        });
+        expect_abort([] {
+            control_block block(nullptr);
+            block.counts.store(weak_one | strong_mask);
+            add_strong(&block);
         });
     });
-    test::run("atomic reference saturation", [] {
-        // The last value below the threshold still increments normally.
-        std::atomic<std::size_t> below{own::detail::saturation_limit - 1};
-        own::detail::increment(below);
-        CHECK(below.load() == own::detail::saturation_limit);
+    test::run("weak reference saturation", [] {
+        using namespace own::detail;
+        control_block below(nullptr);
+        below.counts.store(((saturation_limit - 1) << 32) | strong_one);
+        add_weak(&below);
+        CHECK(weak_of(below.counts.load()) == saturation_limit && below.use_count() == 1);
         expect_abort([] {
-            std::atomic<std::size_t> count{own::detail::saturation_limit};
-            own::detail::increment(count);
-        });
-    });
-    test::run("weak locking saturation", [] {
-        expect_abort([] {
-            own::detail::control_block block(nullptr);
-            block.strong.store(own::detail::saturation_limit);
-            (void)own::detail::try_add_strong(&block);
+            control_block block(nullptr);
+            block.counts.store((saturation_limit << 32) | strong_one);
+            add_weak(&block);
         });
     });
     test::run("atomic zero cannot resurrect", [] {
+        using namespace own::detail;
         expect_abort([] {
-            std::atomic<std::size_t> count{0};
-            own::detail::increment(count);
+            control_block block(nullptr);
+            block.counts.store(weak_one);
+            add_strong(&block);
+        });
+        expect_abort([] {
+            control_block block(nullptr);
+            block.counts.store(0);
+            add_weak(&block);
         });
     });
-    test::run("weak locking overflow", [] {
+    test::run("weak locking saturation", [] {
+        using namespace own::detail;
+        control_block expired(nullptr);
+        expired.counts.store(weak_one);
+        CHECK(!try_add_strong(&expired) && expired.counts.load() == weak_one);
         expect_abort([] {
-            own::detail::control_block block(nullptr);
-            block.strong.store(own::detail::count_limit);
-            (void)own::detail::try_add_strong(&block);
+            control_block block(nullptr);
+            block.counts.store(weak_one | saturation_limit);
+            (void)try_add_strong(&block);
         });
     });
     test::run("local reference overflow", [] {

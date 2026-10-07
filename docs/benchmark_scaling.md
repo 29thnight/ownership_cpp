@@ -95,6 +95,11 @@ isolate that.
 
 ## Safety argument for the saturating increment
 
+*Later revision:* the counts now share one 64-bit word with 32-bit halves, and
+each half saturates at 2^31 with the same argument applied to 2^31 values of
+headroom (see [the count-layout report](benchmark_counts.md)). The text below
+describes the measured revision, which used separate 64-bit counters.
+
 Every `increment` caller already holds a reference, so the count is at least one
 before the add. A previous value of zero is a use-after-release bug and aborts.
 Reaching `saturation_limit` (2^63 - 1 on 64-bit) aborts. Between the threshold and

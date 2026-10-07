@@ -216,7 +216,7 @@ has actual thread confinement; `local_view` merely borrows a pointer and contain
 no thread ID, owner, or automatic validity check. Borrowed payload access still
 needs appropriate lifetime and synchronization.
 
-`make_shared` coallocates object and a compact control block once (a 24-byte
+`make_shared` coallocates object and a compact control block once (a 16-byte
 header, as dense as the standard library's); `make_local` additionally allocates
 a 40-byte local group, for two allocations. Every nonempty `localize()` allocates
 another group. There is no embedded-group optimization in this revision. A
