@@ -30,11 +30,34 @@ PASS weak race never resurrects
 PASS weak copy/drop concurrency
 PASS deferred final-release race
 29/29 tests passed
+PASS empty borrowed views
+PASS retained shared-owner borrowed access
+PASS optional retained local-owner borrowed access
+PASS borrowed views never prolong lifetime
+PASS one strong copy guards borrowed scope
+PASS const and base view conversions
+PASS weak lock then borrowed access
+PASS deferred retirement ignores borrowed views
+8/8 tests passed
+PASS from-this unmanaged and construction states
+PASS from-this shares original control block
+PASS from-this optional local-owner registration
+PASS from-this const payload factories
+PASS from-this copy and move fresh registration
+PASS from-this assignment preserves destination
+PASS from-this inherited offset and virtual bases
+PASS from-this deferred expiry never resurrects
+PASS from-this failed factories clean registration
+PASS from-this concurrent original-block access
+PASS from-this destruction on another thread
+11/11 tests passed
 PASS default factory allocation failures
 PASS aligned default factory allocation failures
 PASS default localization allocation failures
-3/3 tests passed
-PASS foreign get
+PASS borrowed access and copies never allocate
+4/4 tests passed
+PASS foreign unsafe_get
+PASS foreign borrow
 PASS foreign bool
 PASS foreign dereference
 PASS foreign arrow
@@ -54,16 +77,66 @@ PASS atomic zero cannot resurrect
 PASS weak locking overflow
 PASS local reference overflow
 PASS invalid allocator callbacks
-20/20 tests passed
+21/21 tests passed
+PASS exact unsafe_get warning: unsafe_get_kind_0_warning_default
+PASS exact unsafe_get warning: unsafe_get_kind_0_warning_1
+PASS disabled unsafe_get warning: unsafe_get_kind_0_warning_0
+PASS exact unsafe_get warning: unsafe_get_kind_1_warning_default
+PASS exact unsafe_get warning: unsafe_get_kind_1_warning_1
+PASS disabled unsafe_get warning: unsafe_get_kind_1_warning_0
+PASS exact unsafe_get warning: unsafe_get_kind_2_warning_default
+PASS exact unsafe_get warning: unsafe_get_kind_2_warning_1
+PASS disabled unsafe_get warning: unsafe_get_kind_2_warning_0
+PASS exact unsafe_get warning: unsafe_get_kind_3_warning_default
+PASS exact unsafe_get warning: unsafe_get_kind_3_warning_1
+PASS disabled unsafe_get warning: unsafe_get_kind_3_warning_0
+PASS unsafe_get contract and warning-disabled multi-TU link
+PASS compile rejection: ambiguous_owner_from_this
 PASS compile rejection: array_fixed_factory
 PASS compile rejection: array_local_factory
 PASS compile rejection: array_local_owner
+PASS compile rejection: array_local_view
 PASS compile rejection: array_shared_factory
 PASS compile rejection: array_shared_owner
 PASS compile rejection: array_weak_owner
 PASS compile rejection: const_removal
+PASS compile rejection: const_rvalue_borrow_from_this
+PASS compile rejection: const_rvalue_local_borrow
+PASS compile rejection: const_rvalue_local_from_this
+PASS compile rejection: const_rvalue_local_unsafe_get
+PASS compile rejection: const_rvalue_shared_borrow
+PASS compile rejection: const_rvalue_shared_unsafe_get
 PASS compile rejection: implicit_promotion
+PASS compile rejection: implicit_raw_local
+PASS compile rejection: implicit_raw_shared
+PASS compile rejection: implicit_raw_view
+PASS compile rejection: local_get_removed
+PASS compile rejection: mixed_owner_from_this
+PASS compile rejection: private_owner_from_this
+PASS compile rejection: protected_owner_from_this
 PASS compile rejection: raw_local_owner
+PASS compile rejection: raw_local_reset
 PASS compile rejection: raw_shared_owner
+PASS compile rejection: raw_shared_reset
+PASS compile rejection: raw_view
+PASS compile rejection: reference_view
+PASS compile rejection: rvalue_borrow_from_this
+PASS compile rejection: rvalue_local_borrow
+PASS compile rejection: rvalue_local_from_this
+PASS compile rejection: rvalue_local_unsafe_get
+PASS compile rejection: rvalue_shared_borrow
+PASS compile rejection: rvalue_shared_unsafe_get
+PASS compile rejection: shared_get_removed
 PASS compile rejection: throwing_destructor
+PASS compile rejection: view_const_removal
+PASS compile rejection: view_get_removed
+PASS compile rejection: view_to_local_owner
+PASS compile rejection: view_to_shared_owner
+PASS compile rejection: view_to_weak_owner
+PASS compile rejection: weak_borrow_unavailable
+PASS compile rejection: weak_get_unavailable
+PASS compile rejection: weak_lock_rvalue_borrow
+PASS compile rejection: weak_lock_rvalue_unsafe_get
+PASS compile rejection: weak_unsafe_get_unavailable
+PASS compile rejection: wrong_crtp_owner_from_this
 PASS debug (including isolated header and multi-translation-unit link)

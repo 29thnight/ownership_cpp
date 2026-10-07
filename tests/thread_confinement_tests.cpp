@@ -48,7 +48,8 @@ int main() {
     std::cerr << "Thread-confinement death tests require assertions enabled\n";
     return EXIT_FAILURE;
 #elif defined(__unix__) || defined(__APPLE__)
-    test::run("foreign get", [] { foreign_thread([](auto& x) { (void)x.get(); }); });
+    test::run("foreign unsafe_get", [] { foreign_thread([](auto& x) { (void)x.unsafe_get(); }); });
+    test::run("foreign borrow", [] { foreign_thread([](auto& x) { (void)x.borrow(); }); });
     test::run("foreign bool", [] { foreign_thread([](auto& x) { (void)static_cast<bool>(x); }); });
     test::run("foreign dereference", [] { foreign_thread([](auto& x) { (void)*x; }); });
     test::run("foreign arrow", [] { foreign_thread([](auto& x) { (void)x.operator->(); }); });

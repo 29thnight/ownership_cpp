@@ -159,7 +159,7 @@ void empty_owners() {
     own::local_owner<int> local;
     own::weak_owner<int> weak;
     CHECK(!shared && !local);
-    CHECK(shared.get() == nullptr && local.get() == nullptr);
+    CHECK(!shared.borrow() && !local.borrow());
     CHECK(shared.use_count() == 0 && local.use_count() == 0);
     CHECK(local.local_use_count() == 0);
     CHECK(weak.expired() && weak.use_count() == 0 && !weak.lock());
@@ -182,7 +182,7 @@ void shared_lifetime() {
         CHECK(first->value == 123 && (*first).value == 123);
         CHECK(first.use_count() == 1);
         auto second = first;
-        CHECK(first.use_count() == 2 && second.get() == first.get());
+        CHECK(first.use_count() == 2 && std::addressof(*second) == std::addressof(*first));
         auto third = std::move(second);
         CHECK(!second && third.use_count() == 2);
         own::shared_owner<tracked> fourth;
@@ -191,11 +191,11 @@ void shared_lifetime() {
         third.reset();
         CHECK(first.use_count() == 2);
         fourth = fourth;
-        CHECK(fourth.get() == first.get());
+        CHECK(std::addressof(*fourth) == std::addressof(*first));
         second = std::move(fourth);
         CHECK(!fourth);
         first.swap(second);
-        CHECK(first.get() == second.get());
+        CHECK(std::addressof(*first) == std::addressof(*second));
         second.reset();
         CHECK(destroyed == 0 && first.use_count() == 1);
     }
@@ -211,9 +211,9 @@ void local_lifetime_and_promotion() {
         auto second = first;
         auto third = second;
         CHECK(first.local_use_count() == 3 && first.use_count() == 1);
-        CHECK(second.get() == first.get() && (*third).value == 42);
+        CHECK(std::addressof(*second) == std::addressof(*first) && (*third).value == 42);
         escaped = second.share();
-        CHECK(escaped.get() == first.get() && first.use_count() == 2);
+        CHECK(std::addressof(*escaped) == std::addressof(*first) && first.use_count() == 2);
         second.reset();
         CHECK(first.local_use_count() == 2);
         own::local_owner<tracked> fourth;
@@ -223,7 +223,7 @@ void local_lifetime_and_promotion() {
         third = std::move(fourth);
         CHECK(!fourth && first.local_use_count() == 2);
         first.swap(third);
-        CHECK(first.get() == third.get());
+        CHECK(std::addressof(*first) == std::addressof(*third));
     }
     CHECK(destroyed == 0 && escaped.use_count() == 1);
     escaped.reset();
@@ -259,7 +259,7 @@ void rvalue_transitions() {
         CHECK(local && local->value == 42);
         auto alias = local;
         auto promoted = std::move(local).share();
-        CHECK(promoted && promoted.get() == alias.get());
+        CHECK(promoted && std::addressof(*promoted) == std::addressof(*alias));
         alias.reset();
         CHECK(destroyed == 0);
         auto last_local = std::move(promoted).localize();
@@ -279,7 +279,7 @@ void weak_semantics() {
         auto alias = local;
         CHECK(weak.use_count() == 1);
         auto locked = weak.lock();
-        CHECK(locked.get() == local.get() && weak.use_count() == 2);
+        CHECK(std::addressof(*locked) == std::addressof(*local) && weak.use_count() == 2);
         auto copy = weak;
         auto moved = std::move(copy);
         CHECK(copy.expired());
@@ -300,18 +300,18 @@ void shared_conversion_adjusts_pointer() {
     own::weak_owner<const right_base> weak;
     {
         auto original = own::make_shared<derived>(destroyed);
-        auto* adjusted = static_cast<right_base*>(original.get());
-        CHECK(static_cast<void*>(adjusted) != static_cast<void*>(original.get()));
+        auto* adjusted = static_cast<right_base*>(std::addressof(*original));
+        CHECK(static_cast<void*>(adjusted) != static_cast<void*>(std::addressof(*original)));
         own::shared_owner<right_base> base = original;
-        CHECK(base.get() == adjusted && base->right == 31);
+        CHECK(std::addressof(*base) == adjusted && base->right == 31);
         own::shared_owner<const right_base> constant = std::move(base);
-        CHECK(!base && constant.get() == adjusted);
+        CHECK(!base && std::addressof(*constant) == adjusted);
         weak = own::weak_owner<const right_base>(original);
         auto locked = weak.lock();
-        CHECK(locked.get() == adjusted);
+        CHECK(std::addressof(*locked) == adjusted);
         own::shared_owner<const right_base> assigned;
         assigned = original;
-        CHECK(assigned.get() == adjusted);
+        CHECK(std::addressof(*assigned) == adjusted);
         original.reset();
         CHECK(destroyed == 0);
     }
@@ -322,20 +322,20 @@ void local_conversion_adjusts_pointer() {
     std::atomic<int> destroyed{0};
     {
         auto original = own::make_local<derived>(destroyed);
-        auto* adjusted = static_cast<right_base*>(original.get());
+        auto* adjusted = static_cast<right_base*>(std::addressof(*original));
         own::local_owner<right_base> base = original;
-        CHECK(base.get() == adjusted && base->right == 31);
+        CHECK(std::addressof(*base) == adjusted && base->right == 31);
         own::local_owner<const right_base> constant = std::move(base);
-        CHECK(!base && constant.get() == adjusted);
+        CHECK(!base && std::addressof(*constant) == adjusted);
         own::weak_owner<const right_base> weak = original;
-        CHECK(weak.lock().get() == adjusted);
+        CHECK(std::addressof(*weak.lock()) == adjusted);
         own::local_owner<const right_base> assigned;
         assigned = original;
-        CHECK(assigned.get() == adjusted);
+        CHECK(std::addressof(*assigned) == adjusted);
         auto escaped = constant.share();
-        CHECK(escaped.get() == adjusted);
+        CHECK(std::addressof(*escaped) == adjusted);
         auto relocalized = escaped.localize();
-        CHECK(relocalized.get() == adjusted);
+        CHECK(std::addressof(*relocalized) == adjusted);
         CHECK(original.local_use_count() == 3 && relocalized.local_use_count() == 1);
     }
     CHECK(destroyed == 1);
@@ -375,20 +375,20 @@ void virtual_base_weak_conversions() {
     own::weak_owner<virtual_base> base_weak;
     {
         auto source = own::allocate_shared<virtual_derived>(allocation.ref(), destroyed);
-        auto* adjusted = static_cast<virtual_base*>(source.get());
+        auto* adjusted = static_cast<virtual_base*>(std::addressof(*source));
         derived_weak = source;
         base_weak = derived_weak;
-        CHECK(base_weak.lock().get() == adjusted);
+        CHECK(std::addressof(*base_weak.lock()) == adjusted);
         own::weak_owner<const virtual_base> constant_weak = derived_weak;
         CHECK(constant_weak.lock()->value == 91);
         auto derived_copy = derived_weak;
         own::weak_owner<virtual_base> moved = std::move(derived_copy);
-        CHECK(derived_copy.expired() && moved.lock().get() == adjusted);
+        CHECK(derived_copy.expired() && std::addressof(*moved.lock()) == adjusted);
         own::shared_owner<virtual_base> base_shared = source;
-        CHECK(base_shared.get() == adjusted);
+        CHECK(std::addressof(*base_shared) == adjusted);
         auto local = source.localize();
         own::local_owner<virtual_base> base_local = local;
-        CHECK(base_local.get() == adjusted);
+        CHECK(std::addressof(*base_local) == adjusted);
     }
     CHECK(destroyed == 1 && derived_weak.expired());
     // This adjustment must not dereference the destroyed derived object's vptr.
@@ -446,7 +446,7 @@ void custom_allocator_lifetime() {
     {
         auto local = own::allocate_local<tracked>(allocation.ref(), destroyed);
         auto alias = local;
-        CHECK(alias.get() == local.get());
+        CHECK(std::addressof(*alias) == std::addressof(*local));
     }
     CHECK(destroyed == 2);
     allocation.check_balanced();
@@ -460,7 +460,7 @@ void over_aligned_storage() {
         auto second = own::make_local<over_aligned>(destroyed);
         auto third = own::allocate_shared<over_aligned>(allocation.ref(), destroyed);
         auto fourth = own::allocate_local<over_aligned>(allocation.ref(), destroyed);
-        for (const auto* pointer : {first.get(), second.get(), third.get(), fourth.get()}) {
+        for (const auto* pointer : {std::addressof(*first), std::addressof(*second), std::addressof(*third), std::addressof(*fourth)}) {
             CHECK(reinterpret_cast<std::uintptr_t>(pointer) % alignof(over_aligned) == 0);
             CHECK(pointer->bytes.front() == std::byte{});
         }

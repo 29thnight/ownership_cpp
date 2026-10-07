@@ -30,8 +30,30 @@ PASS weak race never resurrects
 PASS weak copy/drop concurrency
 PASS deferred final-release race
 29/29 tests passed
+PASS empty borrowed views
+PASS retained shared-owner borrowed access
+PASS optional retained local-owner borrowed access
+PASS borrowed views never prolong lifetime
+PASS one strong copy guards borrowed scope
+PASS const and base view conversions
+PASS weak lock then borrowed access
+PASS deferred retirement ignores borrowed views
+8/8 tests passed
+PASS from-this unmanaged and construction states
+PASS from-this shares original control block
+PASS from-this optional local-owner registration
+PASS from-this const payload factories
+PASS from-this copy and move fresh registration
+PASS from-this assignment preserves destination
+PASS from-this inherited offset and virtual bases
+PASS from-this deferred expiry never resurrects
+PASS from-this failed factories clean registration
+PASS from-this concurrent original-block access
+PASS from-this destruction on another thread
+11/11 tests passed
 PASS default factory allocation failures
 PASS aligned default factory allocation failures
 PASS default localization allocation failures
-3/3 tests passed
+PASS borrowed access and copies never allocate
+4/4 tests passed
 PASS release (including isolated header and multi-translation-unit link)

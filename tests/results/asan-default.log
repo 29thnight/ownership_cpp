@@ -1,5 +1,5 @@
 
 === asan (g++) ===
-==4854==LeakSanitizer has encountered a fatal error.
-==4854==HINT: For debugging, try setting environment variable LSAN_OPTIONS=verbosity=1:log_threads=1
-==4854==HINT: LeakSanitizer does not work under ptrace (strace, gdb, etc)
+==64==LeakSanitizer has encountered a fatal error.
+==64==HINT: For debugging, try setting environment variable LSAN_OPTIONS=verbosity=1:log_threads=1
+==64==HINT: LeakSanitizer does not work under ptrace (strace, gdb, etc)

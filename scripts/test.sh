@@ -41,18 +41,59 @@ run_mode() {
     "$output/multi_tu"
     "$cxx" "${flags[@]}" "$root/tests/ownership_tests.cpp" -o "$output/ownership_tests"
     "$output/ownership_tests"
+    "$cxx" "${flags[@]}" "$root/tests/borrow_tests.cpp" -o "$output/borrow_tests"
+    "$output/borrow_tests"
+    "$cxx" "${flags[@]}" "$root/tests/owner_from_this_tests.cpp" -o "$output/owner_from_this_tests"
+    "$output/owner_from_this_tests"
     "$cxx" "${flags[@]}" "$root/tests/default_allocation_failure_tests.cpp" -o "$output/default_allocation_failure_tests"
     "$output/default_allocation_failure_tests"
 
     # Death tests intentionally abort. Run them without a sanitizer so the
     # signal result tests the contract rather than sanitizer signal handling.
     if [[ "$selected" == debug ]]; then
-        "$cxx" "${flags[@]}" "$root/tests/thread_confinement_tests.cpp" -o "$output/thread_confinement_tests"
+        "$cxx" "${flags[@]}" -UOWN_ENABLE_UNSAFE_GET_WARNING -DOWN_ENABLE_UNSAFE_GET_WARNING=0 "$root/tests/thread_confinement_tests.cpp" -o "$output/thread_confinement_tests"
         "$output/thread_confinement_tests"
-        local source name
+        # Intentional raw-pointer escape diagnostics are tested separately:
+        # normal header/owner/view operators above must remain warning-clean.
+        local kind setting name source
+        local warning='Borrowed raw pointer: caller must preserve lifetime; do not delete or otherwise deallocate the returned pointer'
+        for kind in 0 1 2 3; do
+            for setting in default 1; do
+                local -a warning_flags=(-UOWN_ENABLE_UNSAFE_GET_WARNING)
+                if [[ "$setting" != default ]]; then
+                    warning_flags+=(-DOWN_ENABLE_UNSAFE_GET_WARNING="$setting")
+                fi
+                name="unsafe_get_kind_${kind}_warning_${setting}"
+                if "$cxx" "${flags[@]}" "${warning_flags[@]}" -DOWN_UNSAFE_GET_KIND="$kind" \
+                    -c "$root/tests/unsafe_get_warning.cpp" -o "$output/$name.o" >"$output/$name.log" 2>&1; then
+                    echo "FAIL expected unsafe_get warning: $name" >&2
+                    return 1
+                fi
+                if ! grep -Fq "$warning" "$output/$name.log" || ! grep -q deprecated "$output/$name.log"; then
+                    echo "FAIL missing exact unsafe_get deprecation diagnostic: $name" >&2
+                    cat "$output/$name.log" >&2
+                    return 1
+                fi
+                echo "PASS exact unsafe_get warning: $name"
+            done
+            name="unsafe_get_kind_${kind}_warning_0"
+            "$cxx" "${flags[@]}" -UOWN_ENABLE_UNSAFE_GET_WARNING -DOWN_ENABLE_UNSAFE_GET_WARNING=0 \
+                -DOWN_UNSAFE_GET_KIND="$kind" "$root/tests/unsafe_get_warning.cpp" -o "$output/$name"
+            "$output/$name"
+            echo "PASS disabled unsafe_get warning: $name"
+        done
+        "$cxx" "${flags[@]}" -UOWN_ENABLE_UNSAFE_GET_WARNING -DOWN_ENABLE_UNSAFE_GET_WARNING=0 \
+            "$root/tests/unsafe_get_contract.cpp" -o "$output/unsafe_get_contract"
+        "$output/unsafe_get_contract"
+        # Consistent program-wide =0 configuration also links across TUs.
+        "$cxx" "${flags[@]}" -UOWN_ENABLE_UNSAFE_GET_WARNING -DOWN_ENABLE_UNSAFE_GET_WARNING=0 \
+            "$root/tests/multi_tu_a.cpp" "$root/tests/multi_tu_b.cpp" \
+            "$root/tests/multi_tu_main.cpp" -o "$output/multi_tu_warning_0"
+        "$output/multi_tu_warning_0"
+        echo "PASS unsafe_get contract and warning-disabled multi-TU link"
         for source in "$root"/tests/compile_fail/*.cpp; do
             name=$(basename "$source" .cpp)
-            if "$cxx" "${flags[@]}" -c "$source" -o "$output/$name.o" >"$output/$name.log" 2>&1; then
+            if "$cxx" "${flags[@]}" -UOWN_ENABLE_UNSAFE_GET_WARNING -DOWN_ENABLE_UNSAFE_GET_WARNING=0 -Wno-unused-variable -Wno-unused-but-set-variable -c "$source" -o "$output/$name.o" >"$output/$name.log" 2>&1; then
                 echo "FAIL compile rejection: $name unexpectedly compiled" >&2
                 return 1
             fi

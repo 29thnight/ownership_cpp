@@ -1,5 +1,5 @@
 
-=== ubsan (g++) ===
+=== debug (g++) ===
 PASS empty owners
 PASS shared lifetime
 PASS local lifetime and promotion
@@ -30,30 +30,40 @@ PASS weak race never resurrects
 PASS weak copy/drop concurrency
 PASS deferred final-release race
 29/29 tests passed
-PASS empty borrowed views
-PASS retained shared-owner borrowed access
-PASS optional retained local-owner borrowed access
-PASS borrowed views never prolong lifetime
-PASS one strong copy guards borrowed scope
-PASS const and base view conversions
-PASS weak lock then borrowed access
-PASS deferred retirement ignores borrowed views
-8/8 tests passed
-PASS from-this unmanaged and construction states
-PASS from-this shares original control block
-PASS from-this optional local-owner registration
-PASS from-this const payload factories
-PASS from-this copy and move fresh registration
-PASS from-this assignment preserves destination
-PASS from-this inherited offset and virtual bases
-PASS from-this deferred expiry never resurrects
-PASS from-this failed factories clean registration
-PASS from-this concurrent original-block access
-PASS from-this destruction on another thread
-11/11 tests passed
 PASS default factory allocation failures
 PASS aligned default factory allocation failures
 PASS default localization allocation failures
-PASS borrowed access and copies never allocate
-4/4 tests passed
-PASS ubsan (including isolated header and multi-translation-unit link)
+3/3 tests passed
+PASS foreign get
+PASS foreign bool
+PASS foreign dereference
+PASS foreign arrow
+PASS foreign shared count
+PASS foreign local count
+PASS foreign copy
+PASS foreign move
+PASS foreign reset
+PASS foreign share
+PASS foreign weak construction
+PASS foreign assignment source
+PASS foreign assignment target
+PASS foreign swap
+PASS foreign destruction
+PASS atomic reference overflow
+PASS atomic zero cannot resurrect
+PASS weak locking overflow
+PASS local reference overflow
+PASS invalid allocator callbacks
+20/20 tests passed
+PASS compile rejection: array_fixed_factory
+PASS compile rejection: array_local_factory
+PASS compile rejection: array_local_owner
+PASS compile rejection: array_shared_factory
+PASS compile rejection: array_shared_owner
+PASS compile rejection: array_weak_owner
+PASS compile rejection: const_removal
+PASS compile rejection: implicit_promotion
+PASS compile rejection: raw_local_owner
+PASS compile rejection: raw_shared_owner
+PASS compile rejection: throwing_destructor
+PASS debug (including isolated header and multi-translation-unit link)
