@@ -1,0 +1,117 @@
+
+=== release (g++) ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
+PASS empty borrowed views
+PASS retained shared-owner borrowed access
+PASS optional retained local-owner borrowed access
+PASS borrowed views never prolong lifetime
+PASS one strong copy guards borrowed scope
+PASS const and base view conversions
+PASS weak lock then borrowed access
+PASS deferred retirement ignores borrowed views
+8/8 tests passed
+PASS from-this unmanaged and construction states
+PASS from-this shares original control block
+PASS from-this optional local-owner registration
+PASS from-this const payload factories
+PASS from-this copy and move fresh registration
+PASS from-this assignment preserves destination
+PASS from-this inherited offset and virtual bases
+PASS from-this deferred expiry never resurrects
+PASS from-this failed factories clean registration
+PASS from-this concurrent original-block access
+PASS from-this destruction on another thread
+11/11 tests passed
+PASS default factory allocation failures
+PASS aligned default factory allocation failures
+PASS default localization allocation failures
+PASS borrowed access and copies never allocate
+4/4 tests passed
+PASS lean unique empty and null handles
+PASS lean unique factory and repeated reset
+PASS lean unique moves and swaps preserve ownership
+PASS lean unique self move and self swap
+PASS lean unique nonvirtual base borrowing remains allowed
+PASS lean unique adjusted virtual-base conversion uses dynamic class delete
+PASS lean unique converting move assignment
+PASS lean unique const factories and conversion
+PASS lean unique perfect forwarding, value initialization, and alignment
+PASS lean unique borrowing survives owner move
+PASS lean unique from-this registration remains unbound
+PASS lean unique reset is empty during reentrant destruction
+PASS lean unique move assignment from nested source payload
+PASS lean unique reset destructor preserves installed replacement
+PASS lean unique synchronized cross-thread transfer and cleanup
+PASS lean unique vector relocation destroys exactly once
+16/16 tests passed
+PASS allocated unique empty and null handles
+PASS allocated unique factory and repeated reset
+PASS allocated unique exact payload-only allocation
+PASS allocated unique move construction and empty source
+PASS allocated unique move assignment releases prior ownership
+PASS allocated unique self move and self swap
+PASS allocated unique swap preserves allocator provenance
+PASS allocated unique adjusted nonvirtual base conversion
+PASS allocated unique converting move assignment
+PASS allocated unique chained virtual-base conversion
+PASS allocated unique const factories and conversion
+PASS allocated unique perfect forwarding and value initialization
+PASS allocated unique over-aligned allocation and base cleanup
+PASS allocated unique throwing allocation failure
+PASS allocated unique null allocation failure
+PASS allocated unique constructor failure frees original storage
+PASS allocated unique bypasses class-specific new and delete
+PASS allocated unique borrowing does not own or allocate
+PASS allocated unique from-this registration remains unbound
+PASS allocated unique reset is empty during reentrant destruction
+PASS allocated unique move assignment from nested source payload
+PASS allocated unique reset destructor preserves installed replacement
+PASS allocated unique synchronized cross-thread transfer and cleanup
+PASS allocated unique vector relocation destroys exactly once
+PASS allocated unique moved-from empty handle outlives payload and heap context
+PASS allocated unique reset-empty handle outlives payload and heap context
+PASS allocated unique expired-context empty and live swaps and assignment
+PASS allocated unique expired-context empty const and virtual-base conversions
+28/28 tests passed
+PASS unique default factory exactly one allocation and failure
+PASS unique aligned default factory exactly one allocation and failure
+PASS unique const default factory exactly one allocation and failure
+PASS unique empty moves and borrows make no allocation attempts
+PASS unique default constructor failure frees payload allocation
+PASS unique from-this neither allocates metadata nor binds
+PASS unique honors class-specific new and delete for mutable and const payloads
+PASS unique constructor failure matches class-specific allocation pair
+PASS unique honors class-specific sized delete
+PASS unique honors aligned class allocation pair including constructor failure
+PASS unique class noexcept new returning null produces empty owner
+11/11 tests passed
+PASS release (including isolated header and multi-translation-unit link)

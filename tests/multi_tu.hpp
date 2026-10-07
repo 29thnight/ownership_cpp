@@ -1,6 +1,12 @@
 #pragma once
 #include <own/ownership.hpp>
 
+own::unique_owner<int> make_unique_in_first_translation_unit();
+own::unique_owner<const int> transfer_unique_in_second_translation_unit(own::unique_owner<int> value);
+
+own::allocated_unique_owner<int> make_allocated_unique_in_first_translation_unit();
+own::allocated_unique_owner<const int> transfer_allocated_unique_in_second_translation_unit(own::allocated_unique_owner<int> value);
+
 own::shared_owner<int> make_in_first_translation_unit();
 own::weak_owner<int> observe_in_second_translation_unit(const own::shared_owner<int>& value);
 

@@ -47,6 +47,12 @@ run_mode() {
     "$output/owner_from_this_tests"
     "$cxx" "${flags[@]}" "$root/tests/default_allocation_failure_tests.cpp" -o "$output/default_allocation_failure_tests"
     "$output/default_allocation_failure_tests"
+    "$cxx" "${flags[@]}" "$root/tests/unique_owner_tests.cpp" -o "$output/unique_owner_tests"
+    "$output/unique_owner_tests"
+    "$cxx" "${flags[@]}" "$root/tests/allocated_unique_owner_tests.cpp" -o "$output/allocated_unique_owner_tests"
+    "$output/allocated_unique_owner_tests"
+    "$cxx" "${flags[@]}" "$root/tests/unique_default_allocation_tests.cpp" -o "$output/unique_default_allocation_tests"
+    "$output/unique_default_allocation_tests"
 
     # Death tests intentionally abort. Run them without a sanitizer so the
     # signal result tests the contract rather than sanitizer signal handling.
@@ -81,6 +87,32 @@ run_mode() {
                 -DOWN_UNSAFE_GET_KIND="$kind" "$root/tests/unsafe_get_warning.cpp" -o "$output/$name"
             "$output/$name"
             echo "PASS disabled unsafe_get warning: $name"
+        done
+        for source in unique_unsafe_get_warning allocated_unique_unsafe_get_warning; do
+            for setting in default 1; do
+                local -a unique_warning_flags=(-UOWN_ENABLE_UNSAFE_GET_WARNING)
+                if [[ "$setting" != default ]]; then
+                    unique_warning_flags+=(-DOWN_ENABLE_UNSAFE_GET_WARNING="$setting")
+                fi
+                name="${source}_${setting}"
+                if "$cxx" "${flags[@]}" "${unique_warning_flags[@]}" \
+                    -c "$root/tests/$source.cpp" -o "$output/$name.o" >"$output/$name.log" 2>&1; then
+                    echo "FAIL expected unique unsafe_get warning: $name" >&2
+                    return 1
+                fi
+                if ! grep -Fq "$warning" "$output/$name.log" || ! grep -q deprecated "$output/$name.log"; then
+                    echo "FAIL missing exact unique unsafe_get deprecation diagnostic: $name" >&2
+                    cat "$output/$name.log" >&2
+                    return 1
+                fi
+                echo "PASS exact unique unsafe_get warning: $name"
+            done
+        done
+        for source in unique_unsafe_get_warning unique_unsafe_get_contract allocated_unique_unsafe_get_warning allocated_unique_unsafe_get_contract; do
+            "$cxx" "${flags[@]}" -UOWN_ENABLE_UNSAFE_GET_WARNING -DOWN_ENABLE_UNSAFE_GET_WARNING=0 \
+                "$root/tests/$source.cpp" -o "$output/${source}_0"
+            "$output/${source}_0"
+            echo "PASS disabled unique unsafe_get warning and contract: $source"
         done
         "$cxx" "${flags[@]}" -UOWN_ENABLE_UNSAFE_GET_WARNING -DOWN_ENABLE_UNSAFE_GET_WARNING=0 \
             "$root/tests/unsafe_get_contract.cpp" -o "$output/unsafe_get_contract"

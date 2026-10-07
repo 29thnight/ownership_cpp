@@ -1,0 +1,5 @@
+
+=== asan (g++) ===
+==<pid>==LeakSanitizer has encountered a fatal error.
+==<pid>==HINT: For debugging, try setting environment variable LSAN_OPTIONS=verbosity=1:log_threads=1
+==<pid>==HINT: LeakSanitizer does not work under ptrace (strace, gdb, etc)

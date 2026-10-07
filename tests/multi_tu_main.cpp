@@ -1,6 +1,12 @@
 #include "multi_tu.hpp"
 
 int main() {
+    auto unique = make_unique_in_first_translation_unit();
+    auto transferred = transfer_unique_in_second_translation_unit(std::move(unique));
+    if (unique || *transferred.borrow() != 83) return 1;
+    auto allocated = make_allocated_unique_in_first_translation_unit();
+    auto allocated_transferred = transfer_allocated_unique_in_second_translation_unit(std::move(allocated));
+    if (allocated || *allocated_transferred.borrow() != 84) return 1;
     auto value = make_in_first_translation_unit();
     auto weak = observe_in_second_translation_unit(value);
     if (*weak.lock() != 76 || read_borrow_in_second_translation_unit(value.borrow()) != 76) return 1;
