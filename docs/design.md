@@ -307,6 +307,18 @@ thread, so the slot needs no synchronization. A thread-exit cleanup frees the
 slot, and groups released later during thread-exit destruction free their own
 storage. Custom allocators always receive every group allocation.
 
+A group created by a local factory is *exclusive* while its strong reference is
+the only reference of any kind to the block: no `share()`, no weak observer, and
+no ownership-from-this registration (checked once, when the group is created).
+Every way to create another reference starts from this group on its own thread,
+so the group can track exclusivity non-atomically (the top bit of its alias
+count, keeping it five words). `share()` and weak observation of a local owner
+end it permanently. When an exclusive group's last alias is released, no other
+thread can hold or create a reference, so the strong count is retired with a
+plain store instead of an atomic decrement; disposal, hooks and the weak release
+proceed as usual. A local owner that is created, used and dropped without being
+shared therefore performs no atomic read-modify-write.
+
 An `allocator_ref` contains a context and byte allocate/deallocate callbacks.
 Return suitably aligned storage or throw; null becomes `std::bad_alloc`.
 Deallocate is `noexcept` and receives the exact original size/alignment. Allocator

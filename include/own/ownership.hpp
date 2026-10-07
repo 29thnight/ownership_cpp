@@ -310,6 +310,12 @@ namespace own
 
         struct local_group
         {
+            // Alias count in the low bits. The top bit marks an exclusive group:
+            // its strong reference is the only reference of any kind to the
+            // block, which only a local factory can establish and only this
+            // thread can end (share(), weak observation). Packed here so the
+            // group stays five words.
+            static constexpr std::size_t exclusive_bit = ~(count_limit >> 1);
             std::size_t references = 1;
             control_block* block;
             // Only what release() needs: 2 words rather than a whole allocator_ref.
@@ -333,14 +339,29 @@ namespace own
             void add_reference() noexcept
             {
                 check_thread();
-                if (references == count_limit) { fail_fast(); }
+                if ((references & ~exclusive_bit) >= (exclusive_bit - 1)) { fail_fast(); }
                 ++references;
             }
             void release() noexcept
             {
                 check_thread();
-                if (--references == 0)
+                if (((--references) & ~exclusive_bit) == 0)
                 {
+                    if (references & exclusive_bit)
+                    {
+                        // No other owner, observer or registration exists and
+                        // none can be created except through this group, so no
+                        // other thread can touch the counts: no atomic decrement.
+                        references = 0;
+                        auto* control = block;
+                        auto* resource = context;
+                        auto release_storage = deallocate;
+                        this->~local_group();
+                        release_storage(resource, this, sizeof(local_group), alignof(local_group));
+                        control->counts.store(weak_one, std::memory_order_relaxed);
+                        last_strong_released(control);
+                        return;
+                    }
                     auto* control = block;
                     auto* resource = context;
                     auto release_storage = deallocate;
@@ -906,12 +927,13 @@ namespace own
         std::size_t local_use_count() const noexcept
         {
             check_thread();
-            return group_ ? group_->references : 0;
+            return group_ ? group_->references & ~detail::local_group::exclusive_bit : 0;
         }
         [[nodiscard]] shared_owner<T> share() const noexcept
         {
             check_thread();
             if (!group_) { return {}; }
+            group_->references &= ~detail::local_group::exclusive_bit;
             detail::add_strong(group_->block);
             return shared_owner<T>(group_->block, pointer_);
         }
@@ -1002,6 +1024,7 @@ namespace own
             other.check_thread();
             if (other.group_)
             {
+                other.group_->references &= ~detail::local_group::exclusive_bit;
                 block_ = other.group_->block;
                 pointer_ = other.pointer_;
                 detail::add_weak(block_);
@@ -1167,6 +1190,12 @@ namespace own
                 auto* block = static_cast<Block*>(owner.block_);
                 allocator_ref no_storage{nullptr, nullptr, embedded_group_release};
                 auto* group = ::new (static_cast<void*>(block->group.storage)) local_group(block, no_storage);
+                // Fresh from the factory and unpublished: exclusive unless the
+                // payload registered ownership from this (an extra weak).
+                if (block->counts.load(std::memory_order_relaxed) == unique_counts)
+                {
+                    group->references |= local_group::exclusive_bit;
+                }
                 auto* pointer = std::exchange(owner.pointer_, nullptr);
                 owner.block_ = nullptr;
                 return local_owner<T>(group, pointer);
