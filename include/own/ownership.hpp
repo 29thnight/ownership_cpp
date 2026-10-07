@@ -256,11 +256,11 @@ namespace own
             }
         };
 
-#if OWN_DEBUG_THREAD_CHECK
         inline std::size_t current_thread_id() noexcept
         {
             // Unique monotonic IDs also catch destruction on a newly created
             // thread after the origin thread has exited (TLS addresses reuse).
+            // IDs start at 1: zero marks a group created without checks.
             static std::atomic<std::size_t> next{1};
             thread_local const std::size_t id = []() noexcept
             {
@@ -277,16 +277,17 @@ namespace own
             }();
             return id;
         }
-#endif
 
         struct local_group
         {
             std::size_t references = 1;
             control_block* block;
             allocator_ref allocator;
-#if OWN_DEBUG_THREAD_CHECK
-            const std::size_t thread_id = current_thread_id();
-#endif
+            // Present in every configuration: translation units that disagree on
+            // NDEBUG/OWN_DEBUG_THREAD_CHECK must still agree on size and offsets,
+            // because groups are allocated, read and freed across them. Zero means
+            // the group was created without checks; such a group is never checked.
+            const std::size_t thread_id = OWN_DEBUG_THREAD_CHECK ? current_thread_id() : 0;
             local_group(control_block* control, allocator_ref resource) noexcept
                 : block(control), allocator(resource)
             {
@@ -294,7 +295,7 @@ namespace own
             void check_thread() const noexcept
             {
 #if OWN_DEBUG_THREAD_CHECK
-                if (thread_id != current_thread_id()) { fail_fast(); }
+                if (thread_id != 0 && thread_id != current_thread_id()) { fail_fast(); }
 #endif
             }
             void add_reference() noexcept

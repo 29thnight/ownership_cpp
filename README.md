@@ -206,6 +206,11 @@ non-atomic local count. `share()` creates a global owner; `shared.localize()` cr
 a fresh local group. Cancellation and migrating callbacks must not carry local
 owners across threads. Share across the boundary, then localize if needed.
 
+Thread misuse aborts in builds without `NDEBUG` (override with
+`OWN_DEBUG_THREAD_CHECK=0/1`). Translation units may differ in this setting
+without memory-safety consequences; diagnostics are guaranteed only when every
+translation unit enables them.
+
 `local` does not mean an automatically enforced lexical lifetime. `local_owner`
 has actual thread confinement; `local_view` merely borrows a pointer and contains
 no thread ID, owner, or automatic validity check. Borrowed payload access still

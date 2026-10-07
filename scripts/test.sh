@@ -39,6 +39,10 @@ run_mode() {
     "$cxx" "${flags[@]}" "$root/tests/multi_tu_a.cpp" "$root/tests/multi_tu_b.cpp" \
         "$root/tests/multi_tu_main.cpp" -o "$output/multi_tu"
     "$output/multi_tu"
+    # Translation units with and without debug thread checks share local groups.
+    "$cxx" "${flags[@]}" "$root/tests/mixed_thread_check_off.cpp" "$root/tests/mixed_thread_check_on.cpp" \
+        "$root/tests/mixed_thread_check_main.cpp" -o "$output/mixed_thread_check"
+    "$output/mixed_thread_check"
     "$cxx" "${flags[@]}" "$root/tests/ownership_tests.cpp" -o "$output/ownership_tests"
     "$output/ownership_tests"
     "$cxx" "${flags[@]}" "$root/tests/borrow_tests.cpp" -o "$output/borrow_tests"

@@ -186,7 +186,14 @@ Local alias count increments/decrements are ordinary accesses. Debug checks use
 monotonic per-thread IDs, so a new thread that reuses an old thread's TLS address
 will still be rejected. This costs one process-wide atomic ID reservation per
 thread in debug builds; ordinary local copies perform no global atomic operation.
-Debug check configuration must be uniform across a program's translation units.
+`OWN_DEBUG_THREAD_CHECK` defaults from `NDEBUG`, which commonly differs between
+a release-built library and a debug application. The check therefore changes
+behavior only, never layout: every group stores a thread ID field, and a group
+created without checks stores zero and is never checked. Mixing configurations is
+memory-safe (a debug reader cannot read past a release-sized group, and every
+group is freed with the size it was allocated with), but where configurations mix,
+the linker may select either inline body, so diagnostics are only guaranteed when
+the whole program uses checks. The field costs 8 bytes per group in every build.
 There is no guarantee across unloadable/reloadable dynamic-library boundaries.
 
 ## Ownership from this
