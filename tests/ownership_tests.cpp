@@ -190,7 +190,8 @@ void shared_lifetime() {
         CHECK(first.use_count() == 3);
         third.reset();
         CHECK(first.use_count() == 2);
-        fourth = fourth;
+        auto& fourth_alias = fourth; // Self-assignment through an alias keeps Clang's warning quiet.
+        fourth = fourth_alias;
         CHECK(std::addressof(*fourth) == std::addressof(*first));
         second = std::move(fourth);
         CHECK(!fourth);
@@ -219,7 +220,8 @@ void local_lifetime_and_promotion() {
         own::local_owner<tracked> fourth;
         fourth = first;
         CHECK(first.local_use_count() == 3);
-        fourth = fourth;
+        auto& fourth_alias = fourth;
+        fourth = fourth_alias;
         third = std::move(fourth);
         CHECK(!fourth && first.local_use_count() == 2);
         first.swap(third);

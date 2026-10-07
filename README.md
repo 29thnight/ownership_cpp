@@ -266,7 +266,10 @@ from 1 to N threads against `std::shared_ptr`, with private-object and weak-lock
 controls; the single-instruction increment cut four-thread copy/drop cost by
 about 40% on the measured VM.
 
-Windows/MSVC, Clang, macOS and other architectures are not yet validated. These
+Clang 18 on Linux x86-64 passes the debug and release suites; the CI workflow
+(`.github/workflows/ci.yml`) also runs every sanitizer mode with GCC and Clang and
+smoke-runs the benchmark harnesses. Windows/MSVC, macOS and other architectures
+are not yet validated. These
 are CPU simulations, not measured engine integration or actual GPU execution.
 
 ## Measured borrowing costs
