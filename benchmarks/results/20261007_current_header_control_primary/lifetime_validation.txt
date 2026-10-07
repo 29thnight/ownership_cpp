@@ -1,0 +1,3 @@
+own: old hot-reload version retained by scene and global frame lease; weak cache expired at last strong; destructor waited for simulated fence; both versions destroyed exactly once: PASS
+std: equivalent custom-deleter lifetime sequence: PASS
+Fences are monotonically advanced integers; no GPU, renderer, graphics driver, or actual completion event is measured. Deferred std payloads use a separate allocation because make_shared cannot accept a custom deleter. This validation is untimed.

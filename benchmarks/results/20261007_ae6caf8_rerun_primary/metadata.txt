@@ -1,0 +1,21 @@
+Public reproduction metadata; workspace paths and host identifiers omitted.
+Compiler: GCC 14.2.0 (Debian 14.2.0-19), libstdc++
+CPU model: AMD EPYC 9V74 80-Core Processor
+Architecture: x86-64
+OS: Linux 6.18.44
+Compiler flags: -std=c++20 -O3 -DNDEBUG -march=native -pthread -Wall -Wextra -Wpedantic -Iinclude
+
+ownership.hpp SHA256: f2a8a71b1bdf30311618a92aa657d01b39459290df6a88d0a49c1b9c6f3f6c88
+ownership_bench.cpp SHA256: cafb96ef1d60afc4fe251057a3fc053772d31fbd3105e5f1a453e5bf0884feae
+
+samples=101
+warmups=5
+iterations=100000
+shuffle_seed=12648430
+thread_activation=created_and_joined_before_timing
+clock=steady_clock
+tail_definition=nearest_rank_across_batch_normalized_samples
+observable_checksum=20688493065280
+glibc_single_threaded=0
+
+Collection note: metadata was minimized before publication; timing samples and benchmark/header sources are unchanged.

@@ -27,7 +27,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <type_traits>
 #include <utility>
 #include <vector>
 #if __has_include(<sys/single_threaded.h>)
@@ -85,19 +84,6 @@ struct own_ops {
     static auto share(const local<asset>& p) { return p.share(); }
 };
 
-// Same lifetime contract on both sides: the caller keeps the owning handle
-// alive and unchanged until all copies of these non-owning borrows are unused.
-struct std_borrow_ops : std_ops {
-    using borrowed = const asset*;
-    static borrowed borrow(const shared<asset>& owner) noexcept { return owner.get(); }
-};
-struct own_borrow_ops : own_ops {
-    using borrowed = own::local_view<const asset>;
-    static borrowed borrow(const shared<asset>& owner) noexcept { return owner.borrow(); }
-};
-static_assert(sizeof(own_borrow_ops::borrowed) == sizeof(const asset*));
-static_assert(std::is_trivially_copyable_v<own_borrow_ops::borrowed>);
-
 struct sample_case {
     std::string name, implementation, unit;
     std::size_t operations;
@@ -114,72 +100,6 @@ std::uint64_t copy_drop(const Pointer& root, std::size_t iterations) {
         Pointer copy = root;
         escape(copy);
         sum += copy->words[i & 7];
-    }
-    return sum;
-}
-
-// A non-inlined by-value boundary makes parameter passing visible in both
-// cases. Borrowing and independent owning arguments have separate case names.
-// The same payload read and escape barrier are used for every pointer type.
-template<class Pointer>
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline))
-#endif
-std::uint64_t read_parameter(Pointer value, std::size_t index) noexcept {
-    escape(value);
-    return value->words[index & 7];
-}
-template<class Pointer>
-std::uint64_t parameter_reads(const Pointer& value, std::size_t iterations) {
-    std::uint64_t sum = 0;
-    for (std::size_t i = 0; i < iterations; ++i) sum += read_parameter(value, i);
-    return sum;
-}
-
-// owners_ outlives draws_: no erase/reset/hot reload happens during these loops.
-// The contiguous submission array stores only pointer-sized borrows on BOTH
-// sides. Retaining a frame that outlives this object would require real owners.
-template<class Ops>
-class borrowed_draws {
-    using Shared = typename Ops::template shared<asset>;
-    std::vector<Shared> owners_;
-    std::vector<typename Ops::borrowed> draws_;
-public:
-    borrowed_draws() {
-        owners_.reserve(64);
-        draws_.reserve(4096);
-        for (std::size_t i = 0; i < 64; ++i) owners_.push_back(Ops::make(i));
-        for (std::size_t i = 0; i < 4096; ++i)
-            draws_.push_back(Ops::borrow(owners_[(i * 17) % 64]));
-    }
-    template<bool ParameterBoundary>
-    std::uint64_t frame() const {
-        std::uint64_t sum = 0;
-        for (std::size_t i = 0; i < draws_.size(); ++i) {
-            auto view = draws_[i];
-            if constexpr (ParameterBoundary) sum += read_parameter(view, i);
-            else { escape(view); sum += view->words[i & 7]; }
-        }
-        return sum;
-    }
-};
-
-// Exactly one owning copy pins each scope. Reset the only original owner, read
-// through non-owning borrows, then move the pin back to set up the next scope.
-// No special guard type or local_owner group is involved.
-template<class Ops>
-std::uint64_t resettable_root_scopes(typename Ops::template shared<asset>& original,
-                                     std::size_t scopes, std::size_t reads) {
-    std::uint64_t sum = 0;
-    for (std::size_t i = 0; i < scopes; ++i) {
-        auto pin = original;
-        original.reset();
-        {
-            auto view = Ops::borrow(pin);
-            sum += copy_drop(view, reads);
-        }
-        original = std::move(pin);
-        escape(original);
     }
     return sum;
 }
@@ -234,7 +154,7 @@ public:
 
 // A persistent queue and worker. Only global shared owners cross its boundary.
 // Worker-local groups are created, copied and destroyed on that worker only.
-template<class Ops, bool BorrowedScope = false>
+template<class Ops>
 class async_queue {
     using Shared = typename Ops::template shared<asset>;
     struct job { Shared value; std::size_t copies; };
@@ -257,15 +177,8 @@ class async_queue {
             }
             std::uint64_t value;
             {
-                if constexpr (BorrowedScope) {
-                    // item.value is the receiving worker's owner for the whole
-                    // scope; no local owner/group or view crosses the queue.
-                    auto view = Ops::borrow(item.value);
-                    value = copy_drop(view, item.copies);
-                } else {
-                    auto local = Ops::localize(item.value);
-                    value = copy_drop(local, item.copies);
-                }
+                auto local = Ops::localize(item.value);
+                value = copy_drop(local, item.copies);
             }
             item.value.reset();
             {
@@ -402,28 +315,12 @@ void allocation_report(const std::filesystem::path& output) {
         for (std::size_t i = 0; i < 4096; ++i) values.push_back(root.localize(c.ref()));
         escape(values);
     });
-    record("retained_shared_4096_borrows", "std_raw_borrow", [](auto& c) {
-        auto root = std::allocate_shared<asset>(counting_allocator<asset>(&c), 1);
-        const auto before = c.calls;
-        const auto count = root.use_count();
-        std::vector<const asset*> values(4096, root.get()); escape(values);
-        check(c.calls == before && root.use_count() == count, "std borrow changed ownership allocation/count");
-    });
-    record("retained_shared_4096_borrows", "own_local_view", [](auto& c) {
-        auto root = own::allocate_shared<asset>(c.ref(), 1);
-        const auto before = c.calls;
-        const auto count = root.use_count();
-        std::vector<own::local_view<const asset>> values(4096, root.borrow()); escape(values);
-        check(c.calls == before && root.use_count() == count, "view changed ownership allocation/count");
-    });
     std::ofstream sizes(output / "sizes.csv");
     sizes << "type,sizeof_bytes\nasset," << sizeof(asset)
           << "\nstd_shared_ptr," << sizeof(std::shared_ptr<asset>)
           << "\nstd_weak_ptr," << sizeof(std::weak_ptr<asset>)
           << "\nown_shared_owner," << sizeof(own::shared_owner<asset>)
           << "\nown_local_owner," << sizeof(own::local_owner<asset>)
-          << "\nown_local_view," << sizeof(own::local_view<asset>)
-          << "\nraw_pointer," << sizeof(asset*)
           << "\nown_weak_owner," << sizeof(own::weak_owner<asset>) << '\n';
 }
 
@@ -523,51 +420,6 @@ void lifetime_validation(const std::filesystem::path& output) {
         queue.advance(6); check(deaths.load() == 2, "std scene/cache release leaked payload");
         trace << "std: equivalent custom-deleter lifetime sequence: PASS\n";
     }
-    {
-        std::atomic<std::size_t> deaths{0};
-        auto original = own::make_shared<asset>(7, 1, &deaths);
-        own::weak_owner<asset> weak = original;
-        {
-            auto pin = original;
-            check(pin.use_count() == 2, "scope pin must add exactly one strong reference");
-            original.reset();
-            check(pin.use_count() == 1 && deaths.load() == 0, "scope pin failed to retain payload");
-            {
-                auto view = pin.borrow();
-                auto copy = view;
-                check(copy->id == 7 && pin.use_count() == 1, "view copy changed ownership");
-                auto locked = weak.lock();
-                check(bool(locked), "live weak lock failed");
-                auto weak_view = locked.borrow();
-                check(weak_view->version == 1, "lock-then-borrow failed");
-            }
-            check(deaths.load() == 0, "borrow scope destroyed payload");
-        }
-        check(deaths.load() == 1 && weak.expired() && !weak.lock(), "scope pin lifetime validation failed");
-        trace << "own borrow: one explicit shared pin retained payload after sole original reset; copying views did not change strong count; weak lock preceded borrow; final pin destruction destroyed payload exactly once: PASS\n";
-    }
-    {
-        std::atomic<std::size_t> deaths{0};
-        auto original = std::make_shared<asset>(7, 1, &deaths);
-        std::weak_ptr<asset> weak = original;
-        {
-            auto pin = original;
-            check(pin.use_count() == 2, "std pin count");
-            original.reset();
-            {
-                const asset* view = pin.get();
-                auto copy = view;
-                check(copy->id == 7 && pin.use_count() == 1, "std raw borrow ownership");
-                auto locked = weak.lock();
-                check(bool(locked), "std weak lock failed");
-                const asset* weak_view = locked.get();
-                check(weak_view->version == 1, "std lock-then-borrow failed");
-            }
-            check(deaths.load() == 0, "std borrow scope destroyed payload");
-        }
-        check(deaths.load() == 1 && weak.expired() && !weak.lock(), "std scope pin lifetime validation failed");
-        trace << "std borrow: equivalent retained-owner raw pointer and one explicit shared pin lifetime sequence: PASS\n";
-    }
     trace << "Fences are monotonically advanced integers; no GPU, renderer, graphics driver, or actual completion event is measured. Deferred std payloads use a separate allocation because make_shared cannot accept a custom deleter. This validation is untimed.\n";
 }
 
@@ -661,12 +513,6 @@ int main(int argc, char** argv) try {
     scene<own_ops> own_scene;
     async_queue<std_ops> std_async;
     async_queue<own_ops> own_async;
-    async_queue<std_borrow_ops, true> std_borrow_async;
-    async_queue<own_borrow_ops, true> own_borrow_async;
-    borrowed_draws<std_borrow_ops> std_draws;
-    borrowed_draws<own_borrow_ops> own_draws;
-    auto std_resettable_root = std::make_shared<asset>(1);
-    auto own_resettable_root = own::make_shared<asset>(1);
     copy_workers contenders(2);
     std::array<std::uint64_t, 2> sums{};
     std::vector<sample_case> cases;
@@ -797,51 +643,6 @@ int main(int argc, char** argv) try {
         add(name, "own_local", "job", jobs, [&, copies] { return own_async.run(own_root, jobs, copies); });
     }
 
-    // The original 37 named cases above remain available unchanged. These
-    // additional comparisons center the new non-owning API and use an equally
-    // non-owning std raw-pointer baseline under exactly the same lifetime rule.
-    add("owner_retained_borrow_copy_read", "std_raw_borrow", "read", n, [&] {
-        auto view = std_borrow_ops::borrow(std_root); return copy_drop(view, n);
-    });
-    add("owner_retained_borrow_copy_read", "own_local_view", "read", n, [&] {
-        auto view = own_borrow_ops::borrow(own_root); return copy_drop(view, n);
-    });
-    add("owner_retained_borrow_parameter", "std_raw_borrow", "call", n, [&] {
-        auto view = std_borrow_ops::borrow(std_root); return parameter_reads(view, n);
-    });
-    add("owner_retained_borrow_parameter", "own_local_view", "call", n, [&] {
-        auto view = own_borrow_ops::borrow(own_root); return parameter_reads(view, n);
-    });
-    // These arguments DO carry independent lifetime responsibility. Their cost
-    // must not be presented as an equivalent contract to the borrowed cases.
-    add("independent_owner_parameter", "std_shared", "call", n, [&] { return parameter_reads(std_root, n); });
-    add("independent_owner_parameter", "own_shared", "call", n, [&] { return parameter_reads(own_root, n); });
-    add("independent_owner_parameter", "own_local", "call", n, [&] { return parameter_reads(own_local, n); });
-    const auto scopes = std::max<std::size_t>(32, n / 1024);
-    add("resettable_root_pin_1024_borrow_reads", "std_shared_pin_raw_borrow", "scope", scopes, [&] {
-        return resettable_root_scopes<std_borrow_ops>(std_resettable_root, scopes, 1024);
-    });
-    add("resettable_root_pin_1024_borrow_reads", "own_shared_pin_local_view", "scope", scopes, [&] {
-        return resettable_root_scopes<own_borrow_ops>(own_resettable_root, scopes, 1024);
-    });
-    add("owner_retained_4096_draw_borrows", "std_raw_borrow", "frame", frames, [&] {
-        std::uint64_t sum = 0; for (std::size_t i = 0; i < frames; ++i) sum += std_draws.frame<false>(); return sum;
-    });
-    add("owner_retained_4096_draw_borrows", "own_local_view", "frame", frames, [&] {
-        std::uint64_t sum = 0; for (std::size_t i = 0; i < frames; ++i) sum += own_draws.frame<false>(); return sum;
-    });
-    add("owner_retained_4096_parameter_borrows", "std_raw_borrow", "frame", frames, [&] {
-        std::uint64_t sum = 0; for (std::size_t i = 0; i < frames; ++i) sum += std_draws.frame<true>(); return sum;
-    });
-    add("owner_retained_4096_parameter_borrows", "own_local_view", "frame", frames, [&] {
-        std::uint64_t sum = 0; for (std::size_t i = 0; i < frames; ++i) sum += own_draws.frame<true>(); return sum;
-    });
-    for (auto reads : {std::size_t(1), std::size_t(64), std::size_t(1024)}) {
-        auto name = "async_queue_job_" + std::to_string(reads) + "_borrow_reads";
-        add(name, "std_shared_then_raw_borrow", "job", jobs, [&, reads] { return std_borrow_async.run(std_root, jobs, reads); });
-        add(name, "own_shared_then_local_view", "job", jobs, [&, reads] { return own_borrow_async.run(own_root, jobs, reads); });
-    }
-
     // One deterministic shuffled case ordering per round avoids systematically
     // assigning the same thermal/scheduler phase to either implementation.
     std::vector<std::size_t> order(cases.size());
@@ -892,9 +693,6 @@ int main(int argc, char** argv) try {
     }
     std::ofstream runinfo(options.output / "run.txt");
     runinfo << "samples=" << options.samples << "\nwarmups=" << options.warmups << "\niterations=" << n
-            << "\ncase_count=" << cases.size()
-            << "\nunsafe_get_warning=" << OWN_ENABLE_UNSAFE_GET_WARNING
-            << "\nown_raw_access=none"
             << "\nshuffle_seed=12648430\nthread_activation=created_and_joined_before_timing\n"
             << "clock=steady_clock\ntail_definition=nearest_rank_across_batch_normalized_samples\n"
             << "observable_checksum=" << observable_checksum << '\n';

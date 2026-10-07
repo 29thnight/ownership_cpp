@@ -1,121 +1,273 @@
-# Measured ownership and asset-lease costs
+# Shared ownership and lifetime-bounded borrowing: measured results
 
-## What the measurements support
+## What these measurements support
 
-On this **one Linux cloud VM**, reusing a thread-confined local group made the deliberately ownership-heavy copy loops cheaper. That did **not** turn into a general frame-time improvement:
+`shared_owner` carries independent shared lifetime. `local_view` is a pointer-sized,
+trivially copyable **non-owning** access handle: an owner must keep the payload alive
+for every use. The appropriate standard-library baseline is a retained
+`std::shared_ptr` plus a raw pointer borrow with the same lifetime contract.
 
-- Copy/read/drop: `own::local_owner` **1.220 ns**, `std::shared_ptr` **11.897 ns** median. A raw borrow was **0.543 ns**; do not introduce ownership copies when a borrow is sufficient
-- Including a fresh group and only one local copy: **19.275 ns own vs 19.248 ns std**, effectively equal here. Reuse is essential; this is not a universal crossover threshold
-- Construction/destruction: **12.708 ns own shared**, **22.219 ns own local**, **11.657 ns std**. Own local creation paid for an extra allocation
-- Optimized deduplicated frame (4,096 draws, 64 global leases): **3.942 µs own vs 3.823 µs std**. The repeat was **3.844 vs 3.789 µs**. There is no measured frame win; small differences are within the limitations of this host
-- Full synthetic asset lifecycle, including 64 old/new versions, 4,096 scene attachments, hot reload, expired weak cache and unload: **23.949 µs own vs 35.143 µs std**. This is a CPU simulation, not an engine integration
-- Queue jobs with only one local copy were about equal. At 1,024 ownership copies/job: **4.136 µs own vs 17.342 µs std**, including enqueue/wakeup/completion and group setup
+On this one Linux cloud VM:
 
-Global `own::shared_owner` copies also measured faster than this libstdc++ implementation, but that is **not** an intrinsic guarantee of atomic reference counting or a complete `std::shared_ptr` feature comparison. Own's overflow-checked CAS increment can retry under contention. Two workers are measured; many-core scaling, NUMA traffic and worst-case progress are not established.
+- Borrowed by-value parameters measured **1.357 ns/call for both** `local_view` and the standard raw-borrow baseline. Their non-inlined parameter helpers contain [matching instructions](../benchmarks/results/20261007_view_repeat/borrow_parameter_codegen.txt), with no allocation or reference-count operation
+- A contiguous 4,096-draw borrow loop measured **2.882 µs own vs 2.927 µs std**; the independent process repeat was **2.918 vs 2.915 µs**. There is no useful measured draw-loop advantage here
+- One shared pin at scope entry, original-owner reset, and 1,024 borrowed reads measured **565.887 ns own vs 405.753 ns std**; repeat **566.814 vs 405.144 ns**. Own was slower in this benchmark. The pin is ordinary shared ownership; the loop itself makes no ownership copies
+- Shared queue handoff followed by 1,024 worker-local borrowed reads measured **1.351 µs own vs 1.363 µs std/job**; repeat **1.388 vs 1.320 µs**. Queue synchronization and scheduling are included, so this is not isolated borrow or reference-count latency
+- The tight single-object borrow loop measured **0.364 ns/read own vs 0.543 ns/read std**. This does not establish a general advantage over raw pointers: surrounding generated code matters, the parameter helpers match, and the pin workload reverses the result
 
-## Reproduce
+The useful change is making lifetime-bounded borrowing explicit without adding an
+ownership allocation, count, or guard. It is **not** replacing independent ownership
+with an equivalent cheaper owner. `local_owner` remains an optional,
+thread-confined independent-local-lifetime owner with its existing separate group
+allocation. This change did not optimize, embed, or merge that group.
 
-From the repository root:
+No target engine, renderer, graphics API or real GPU workload was measured. A view
+is not a borrow checker, cannot detect a dangling lifetime, and provides no payload
+synchronization. The optional `enable_owner_from_this` mixin is not exercised by
+these timing cases; the payload is an ordinary, non-inheriting asset.
+
+## Reproduce and audit
 
 ```sh
-BENCH_OUTPUT=benchmarks/results/my_run scripts/benchmark.sh --samples 101 --warmups 5 --iterations 100000
+BENCH_OUTPUT=benchmarks/results/my_view_run \
+scripts/benchmark.sh --samples 101 --warmups 5 --iterations 100000
+
+python3 benchmarks/verify_results.py benchmarks/results/my_view_run
 ```
 
-Requires a C++20 compiler with standard threads/barriers. The script used GCC 14.2.0 and:
+The script refuses to overwrite an existing `raw.csv`. Override `CXX`,
+`BENCH_CXXFLAGS`, `BENCH_OUTPUT`, or `BENCH_SOURCE` when needed. CSV verification
+checks arithmetic, sample counts, matching payload checksums, allocation balance,
+and nearest-rank summaries; it is not a statistical significance test or a
+sanitizer-success check.
+
+GCC 14.2.0 / libstdc++ was used with:
 
 ```text
 -std=c++20 -O3 -DNDEBUG -march=native -pthread -Wall -Wextra -Wpedantic
 ```
 
-Override `CXX`, `BENCH_CXXFLAGS` or `BENCH_OUTPUT` if needed. `-march=native` makes the produced binary host-specific. Do not use sanitizer runs for performance conclusions. `NDEBUG` disables the library's local-thread diagnostics, as expected for its release build.
+No dependencies were installed. `-march=native` is host-specific. `NDEBUG` disables
+local-owner thread diagnostics for release timings. `OWN_ENABLE_UNSAFE_GET_WARNING`
+was **1**, its default: the benchmark never calls an own raw accessor, and the
+standard raw-borrow baseline uses `std::shared_ptr::get()`.
 
-Primary data: [summary](../benchmarks/results/20261007_primary/summary.csv), [every timed sample](../benchmarks/results/20261007_primary/raw.csv), [machine/compiler/source metadata](../benchmarks/results/20261007_primary/metadata.txt), [run settings](../benchmarks/results/20261007_primary/run.txt)
+Published metadata is minimized to compiler/flags, CPU model/architecture, OS,
+run settings and public source hashes. Workspace paths, host identifiers and raw
+system dumps are omitted. Console/diagnostic path and process-ID labels were
+redacted; timing CSV values and tested sources are unchanged. File manifests were
+regenerated after redaction. The current runner now emits only these minimized
+fields; this metadata-only script edit does not change the measured harness.
 
-Independent process repeat: [summary](../benchmarks/results/20261007_repeat/summary.csv), [every timed sample](../benchmarks/results/20261007_repeat/raw.csv), [metadata](../benchmarks/results/20261007_repeat/metadata.txt)
+Current full runs, each with **56 cases × 101 measured samples**, five warmups:
 
-Both runs use the same header and benchmark SHA-256 hashes:
+- Primary: [summary](../benchmarks/results/20261007_view_primary/summary.csv), [all samples](../benchmarks/results/20261007_view_primary/raw.csv), [metadata](../benchmarks/results/20261007_view_primary/metadata.txt), [settings/checksum](../benchmarks/results/20261007_view_primary/run.txt), [file hashes](../benchmarks/results/20261007_view_primary/SHA256SUMS)
+- Independent process repeat: [summary](../benchmarks/results/20261007_view_repeat/summary.csv), [all samples](../benchmarks/results/20261007_view_repeat/raw.csv), [metadata](../benchmarks/results/20261007_view_repeat/metadata.txt), [settings/checksum](../benchmarks/results/20261007_view_repeat/run.txt), [file hashes](../benchmarks/results/20261007_view_repeat/SHA256SUMS)
+
+Both full runs produced checksum `20708780059296`. Source hashes identify the measured header and harness:
 
 ```text
-ownership.hpp       f2a8a71b1bdf30311618a92aa657d01b39459290df6a88d0a49c1b9c6f3f6c88
-ownership_bench.cpp cafb96ef1d60afc4fe251057a3fc053772d31fbd3105e5f1a453e5bf0884feae
+ownership.hpp       896f997b8c5ca0a479ecb21f5c1463510bd7ef64ee4569463c9726ab07cc4e9d
+ownership_bench.cpp d62d87e278744f4b16118ae2fbf049f399e8688dc0ead7d83f40d95cc9c70d4a
 ```
 
-The recorded Git HEAD predates this uncommitted implementation; the file hashes identify the measured sources. CPU reports AMD EPYC 9V74, x86-64, nine available virtual CPUs (affinity 0–8), Linux 6.18.44. No CPU pinning or exclusive CPU reservation was applied. CPU quota/governor were unavailable in the container. Host scheduler, virtualization and frequency noise remain uncontrolled.
+The host reports AMD EPYC 9V74, x86-64, Linux 6.18.44, and GCC/libstdc++ as listed above. No CPU pinning, exclusive reservation, or frequency control was
+applied. Virtualization, host scheduling,
+frequency changes, code layout, inlining and allocator state limit tiny timing
+comparisons. These repeated measurements do not establish worst-case progress,
+NUMA behavior, many-core scaling, or a universal crossover point.
 
-## Measurement controls and interpretation
+## Matched non-owning workloads
 
-- 101 measured rounds after five warmup rounds; case order is deterministically shuffled each round (seed `0xC0FFEE`). A second independent process repeats the whole run
-- A thread is created and joined **before timing**. On glibc, the harness also checks and records `__libc_single_threaded == 0`, preventing the standard library's single-thread reference-count shortcut from flattering the baseline
-- All paired cases execute the same deterministic 88-byte asset payload work. Escaping each temporary through a compiler memory barrier prevents optimizing ownership copies away; the generated binary contains locked atomics. No LTO is used
-- Each case's checksum is checked against the other implementations and all later samples. Both final timing runs produced total checksum `20688493065280`
-- The root remains alive in copy/read/drop tests; factory tests separately include allocation and final destruction. Shared handoff, weak live/expired locks, group setup plus 1/8/64/1,024 copies, and contended global shared copies are included
-- Scene attachments reuse **one local group per resource**. Timed scene reattachment excludes initial registry/group construction, while the full lifecycle case includes it
-- Both frame implementations deduplicate to one global lease per resource, and borrow existing scene owners during draw submission. Neither is charged an artificial ownership copy per draw
-- Async jobs use an identical synchronized deque and persistent worker. Only global shared owners cross the thread boundary. Each worker localizes once, uses/destroys all local aliases there, then releases its job owner. Results include queue/deque allocation, locks, wakeups, dispatch and waiting; they are not pure reference-count costs
-- Contention uses two persistent workers copying the same control block. Values are aggregate elapsed time divided by **both workers' total copies**; they are throughput-normalized costs, not per-thread latencies. Barrier dispatch/completion is included in both
-- Median, p95 and p99 use the nearest-rank distribution of **batch-normalized elapsed times**. They are not distributions of individual copy latency, individual job latency, real-time worst cases, or GPU frame latency. No outlier trimming is applied; 101 rounds give limited tail resolution
-
-## Selected results
-
-All values below are **nanoseconds per stated unit**. The primary p95/p99 and repeat median are shown; every case, minimum, maximum and raw sample is retained in CSV.
+All values below are **nanoseconds per stated unit**. Each row's p95/p99 is computed
+across **batch-normalized elapsed times**, not individual operation latencies.
 
 | Case | Implementation | Unit | Median | p95 | p99 | Repeat median |
 |---|---|---|---:|---:|---:|---:|
-| copy_read_drop | std_shared | copy | 11.897 | 14.599 | 20.287 | 11.735 |
-| copy_read_drop | own_shared | copy | 4.722 | 6.762 | 10.434 | 4.685 |
-| copy_read_drop | own_local | copy | 1.220 | 1.723 | 3.179 | 1.220 |
-| borrow_read | raw_borrow | read | 0.543 | 0.908 | 1.135 | 0.544 |
-| localize_read_drop | std_shared | group | 12.073 | 15.511 | 22.590 | 11.946 |
-| localize_read_drop | own_local | group | 11.113 | 14.009 | 24.980 | 11.047 |
-| group_setup_then_1_copies | std_shared | group | 19.248 | 23.005 | 33.482 | 18.917 |
-| group_setup_then_1_copies | own_local | group | 19.275 | 27.269 | 37.641 | 18.996 |
-| group_setup_then_64_copies | std_shared | group | 763.844 | 958.935 | 1073.265 | 758.478 |
-| group_setup_then_64_copies | own_local | group | 110.817 | 161.250 | 222.974 | 106.976 |
-| create_read_destroy | std_shared | asset | 11.657 | 15.532 | 21.653 | 11.368 |
-| create_read_destroy | own_shared | asset | 12.708 | 15.378 | 20.976 | 12.456 |
-| create_read_destroy | own_local | asset | 22.219 | 28.649 | 43.734 | 21.773 |
-| contended_copy_2_workers | std_shared | copy | 20.513 | 25.329 | 25.799 | 23.113 |
-| contended_copy_2_workers | own_shared | copy | 12.185 | 23.665 | 23.906 | 12.570 |
-| scene_4096_attachments | std_shared | attachment | 6.756 | 8.848 | 9.301 | 5.152 |
-| scene_4096_attachments | own_local | attachment | 1.496 | 2.442 | 2.791 | 1.500 |
-| frame_4096_draws_64_unique_leases | std_shared | frame | 3823.167 | 5873.250 | 9001.625 | 3789.375 |
-| frame_4096_draws_64_unique_leases | own_shared | frame | 3941.667 | 7407.625 | 12023.208 | 3844.000 |
-| resource_lifecycle_64_assets_4096_objects | std_shared | cycle | 35143.000 | 50783.100 | 71608.900 | 34249.600 |
-| resource_lifecycle_64_assets_4096_objects | own_local | cycle | 23948.500 | 33489.500 | 68399.200 | 24114.600 |
-| async_queue_job_1_local_copies | std_shared | job | 550.910 | 960.820 | 1241.230 | 513.260 |
-| async_queue_job_1_local_copies | own_local | job | 560.020 | 1006.490 | 1778.330 | 511.160 |
-| async_queue_job_1024_local_copies | std_shared | job | 17342.240 | 20382.940 | 26975.810 | 16476.970 |
-| async_queue_job_1024_local_copies | own_local | job | 4135.520 | 5880.300 | 6676.970 | 3983.990 |
+| owner_retained_borrow_copy_read | std_raw_borrow | read | 0.543 | 0.691 | 1.131 | 0.545 |
+| owner_retained_borrow_copy_read | own_local_view | read | 0.364 | 0.610 | 0.807 | 0.364 |
+| owner_retained_borrow_parameter | std_raw_borrow | call | 1.357 | 1.902 | 2.311 | 1.358 |
+| owner_retained_borrow_parameter | own_local_view | call | 1.357 | 1.936 | 3.519 | 1.356 |
+| resettable_root_pin_1024_borrow_reads | std_shared_pin_raw_borrow | scope | 405.753 | 586.433 | 1276.629 | 405.144 |
+| resettable_root_pin_1024_borrow_reads | own_shared_pin_local_view | scope | 565.887 | 1131.052 | 1462.876 | 566.814 |
+| owner_retained_4096_draw_borrows | std_raw_borrow | frame | 2927.250 | 5956.333 | 9194.000 | 2915.167 |
+| owner_retained_4096_draw_borrows | own_local_view | frame | 2882.208 | 4112.750 | 11311.708 | 2917.625 |
+| owner_retained_4096_parameter_borrows | std_raw_borrow | frame | 6702.000 | 8720.000 | 14783.958 | 6691.167 |
+| owner_retained_4096_parameter_borrows | own_local_view | frame | 6671.917 | 9092.625 | 17634.000 | 6695.750 |
+| async_queue_job_1_borrow_reads | std_shared_then_raw_borrow | job | 497.240 | 1411.890 | 2437.800 | 477.610 |
+| async_queue_job_1_borrow_reads | own_shared_then_local_view | job | 461.380 | 894.630 | 1756.590 | 470.490 |
+| async_queue_job_64_borrow_reads | std_shared_then_raw_borrow | job | 554.120 | 925.770 | 2316.630 | 636.450 |
+| async_queue_job_64_borrow_reads | own_shared_then_local_view | job | 554.420 | 887.320 | 1013.900 | 591.970 |
+| async_queue_job_1024_borrow_reads | std_shared_then_raw_borrow | job | 1363.120 | 2353.080 | 2729.240 | 1320.450 |
+| async_queue_job_1024_borrow_reads | own_shared_then_local_view | job | 1350.800 | 2680.860 | 3561.870 | 1388.260 |
+
+The cases have explicit lifetime boundaries:
+
+1. `owner_retained_borrow_*`: one existing owner remains alive and unchanged for the whole loop. Both implementations copy only non-owning handles. The parameter case uses the same non-inlined by-value helper and payload read
+2. `resettable_root_pin_*`: copy the shared owner **once** at scope entry, reset the sole original owner, perform 1,024 reads through borrowed copies, and move the pin back to prepare the next scope. Timing includes pin copy, original reset and restoration. Untimed destructor/count checks verify that the pin, not a view, retains the payload
+3. `owner_retained_4096_*`: a retained array of 64 shared owners backs a contiguous array of 4,096 non-owning draw parameters on both sides. Array creation is outside timing; no owner is reset, erased or hot-reloaded during a draw loop. The parameter variant crosses the same non-inlined helper once per draw
+4. `async_queue_job_*_borrow_reads`: shared owners cross an identical synchronized deque into a persistent worker. The receiving job owner remains alive throughout its borrowed scope. Views/raw borrows do not cross the queue. Queue/deque allocation, locks, wakeups, dispatch and completion waiting are included
+
+A view cannot substitute for an asynchronous lease, stored owner, or pin that must
+outlive the owner supplying it. Weak ownership is first locked into a named shared
+owner, then borrowed while that owner remains alive.
+
+## Independent owning copies are a separate contract
+
+These cases deliberately give each temporary or by-value parameter its own
+lifetime responsibility. A borrowed pointer/view does not supply that guarantee.
+The root stays alive so final payload destruction is not mixed into copy costs.
+
+| Case | Implementation | Unit | Median | p95 | p99 | Repeat median |
+|---|---|---|---:|---:|---:|---:|
+| copy_read_drop | std_shared | copy | 11.890 | 14.747 | 15.473 | 12.054 |
+| copy_read_drop | own_shared | copy | 4.697 | 5.814 | 6.733 | 4.701 |
+| copy_read_drop | own_local | copy | 1.218 | 1.809 | 3.493 | 1.222 |
+| independent_owner_parameter | std_shared | call | 11.906 | 14.517 | 16.193 | 11.977 |
+| independent_owner_parameter | own_shared | call | 4.482 | 6.445 | 9.697 | 4.506 |
+| independent_owner_parameter | own_local | call | 1.628 | 2.643 | 3.393 | 1.629 |
+
+`local_owner` copies can amortize their existing local-group setup when independent
+thread-confined ownership is actually needed. Their speed relative to shared
+copies is not a reason to create a group or ownership copies in a lifetime-bounded
+borrow loop. The original group setup, weak-lock, shared handoff, construction,
+contention, scene, lifecycle, and independently owned worker-copy cases are all
+still present in the 56-case CSVs.
+
+## Actual prior-source rerun and unchanged-harness control
+
+The [published report at ae6caf8](benchmark_results_ae6caf8.md) is preserved
+**byte-for-byte**, as are its [original primary](../benchmarks/results/20261007_primary/)
+and [original repeat](../benchmarks/results/20261007_repeat/) artifacts. Its framing
+and results are historical, not newly measured view-first results.
+
+A separate Git checkout was detached at the actual published commit
+`ae6caf8334c6e1b2777d03291065513b5eadeeb7`. Its real header, benchmark and script were
+compiled and run twice with the same GCC 14.2.0 compiler and release flags used
+above. This is not an emulation of the old API on the current implementation:
+
+- Old-source rerun primary: [summary](../benchmarks/results/20261007_ae6caf8_rerun_primary/summary.csv), [raw](../benchmarks/results/20261007_ae6caf8_rerun_primary/raw.csv), [metadata](../benchmarks/results/20261007_ae6caf8_rerun_primary/metadata.txt)
+- Old-source rerun repeat: [summary](../benchmarks/results/20261007_ae6caf8_rerun_repeat/summary.csv), [raw](../benchmarks/results/20261007_ae6caf8_rerun_repeat/raw.csv), [metadata](../benchmarks/results/20261007_ae6caf8_rerun_repeat/metadata.txt)
+
+The byte-exact [old benchmark source](../benchmarks/baseline_ae6caf8/ownership_bench.cpp)
+was then compiled against the current frozen header, without accessor edits or any
+other source compatibility transformation:
+
+- Current-header control primary: [summary](../benchmarks/results/20261007_current_header_control_primary/summary.csv), [raw](../benchmarks/results/20261007_current_header_control_primary/raw.csv), [metadata](../benchmarks/results/20261007_current_header_control_primary/metadata.txt)
+- Current-header control repeat: [summary](../benchmarks/results/20261007_current_header_control_repeat/summary.csv), [raw](../benchmarks/results/20261007_current_header_control_repeat/raw.csv), [metadata](../benchmarks/results/20261007_current_header_control_repeat/metadata.txt)
+
+All four controls retain the exact original **37 cases**, 101 samples and five
+warmups, with checksum `20688493065280`. Old header SHA-256:
+`f2a8a71b1bdf30311618a92aa657d01b39459290df6a88d0a49c1b9c6f3f6c88`.
+Unchanged harness SHA-256:
+`cafb96ef1d60afc4fe251057a3fc053772d31fbd3105e5f1a453e5bf0884feae`.
+
+Selected **median ns/unit** below use the fresh reruns, not the original published
+numbers. [All 37 temporal comparisons](../benchmarks/results/comparison_ae6caf8_to_view.csv)
+are retained, including the published-primary column.
+
+| Case | Implementation | Unit | Old primary | Old repeat | Current primary | Current repeat |
+|---|---|---|---:|---:|---:|---:|
+| copy_read_drop | own_shared | copy | 4.792 | 4.700 | 5.033 | 4.677 |
+| copy_read_drop | own_local | copy | 1.221 | 1.221 | 1.225 | 1.219 |
+| group_setup_then_1_copies | own_local | group | 20.177 | 25.757 | 21.064 | 19.611 |
+| create_read_destroy | std_shared | asset | 12.024 | 11.838 | 12.961 | 11.828 |
+| create_read_destroy | own_shared | asset | 13.593 | 12.639 | 14.341 | 13.119 |
+| create_read_destroy | own_local | asset | 23.353 | 22.440 | 23.960 | 22.530 |
+| frame_4096_draws_64_unique_leases | std_shared | frame | 3897.458 | 3879.917 | 3852.750 | 3840.667 |
+| frame_4096_draws_64_unique_leases | own_shared | frame | 4008.417 | 3878.208 | 3998.000 | 3901.208 |
+| resource_lifecycle_64_assets_4096_objects | std_shared | cycle | 37573.500 | 34895.600 | 39622.600 | 36133.400 |
+| resource_lifecycle_64_assets_4096_objects | own_local | cycle | 25021.000 | 24300.000 | 27251.300 | 24934.000 |
+
+These controls do not establish an ownership-algorithm or allocation improvement;
+the existing plain-payload allocation/count design is unchanged. Both libraries'
+measurements vary between processes. In particular, the expanded harness's own
+`group_setup_then_1_copies` median is 11.219 ns, while the exact old-harness/current-
+header control is 21.064 ns **using the same header**. Additional code changes the
+optimization/layout context and case ordering; no causal library speedup is
+claimed from that discrepancy. Use the unchanged-harness control for historical
+comparisons and the matched new cases for borrowing comparisons.
+
+To repeat the current-header control:
+
+```sh
+BENCH_SOURCE=benchmarks/baseline_ae6caf8/ownership_bench.cpp \
+BENCH_OUTPUT=benchmarks/results/my_current_header_control \
+scripts/benchmark.sh --samples 101 --warmups 5 --iterations 100000
+```
 
 ## Allocation and space overhead
 
-[Allocation counts](../benchmarks/results/20261007_primary/allocations.csv) are measured through equivalent custom allocation callbacks, separately from timings. The standard counting allocator is stateless so instrumentation does not add an allocator pointer to the standard control block. These are **requested bytes**, not allocator size classes, RSS or peak resident memory. Common vector/deque storage is excluded from this ownership-allocation report. All tracked allocations were matched by frees.
+[Allocation counts](../benchmarks/results/20261007_view_primary/allocations.csv) use
+equivalent custom allocation callbacks, outside timing. The standard allocator is
+stateless, avoiding an instrumentation pointer in its control block. Counts and
+bytes concern ownership storage; common vector/deque backing storage is excluded.
+Bytes are requested sizes, not allocator size classes, RSS or peak resident memory.
+Every tracked allocation was freed.
 
-| Scenario | std allocations / bytes | own allocations / bytes |
+| Scenario | std allocations / requested bytes | own allocations / requested bytes |
 |---|---:|---:|
 | Create one shared asset | 1 / 104 | 1 / 160 |
-| Create one local asset | 1 / 104 | 2 / 200 |
-| One reusable group, 4,096 attachments | 1 / 104 | 2 / 200 |
+| Retain one shared asset and form 4,096 borrows | 1 / 104 | 1 / 160 |
+| Extra ownership allocations caused by those borrows | 0 / 0 | 0 / 0 |
+| Create one optional local owner | 1 / 104 | 2 / 200 |
+| One optional reusable local group, 4,096 owning attachments | 1 / 104 | 2 / 200 |
 | 4,096 independent localizations | 1 / 104 | 4,097 / 164,000 |
 
-The payload is 88 bytes. Own's observed coallocated control overhead is 72 bytes plus **40 bytes per local group** in this release build. Handles are 16 bytes each for own local/shared/weak and standard shared/weak on this ABI. Sizes are implementation-specific, not API promises. Repeatedly calling `localize()` for each object recreates groups; local-copy an existing group instead. Weak owners retain the coallocated backing allocation after payload destruction, as with `make_shared`.
+The borrow checks also verify that forming/copying all 4,096 handles does not change
+the retained owner's strong count. This ordinary `owner.borrow()` path has no
+control-block access or guard. The owner allocation exists before borrowing and
+is not attributable to a view.
 
-## Engine-like lifetime validation and boundaries
+[Observed ABI sizes](../benchmarks/results/20261007_view_primary/sizes.csv): payload
+88 bytes; `local_view` and raw pointer **8 bytes**; own shared/local/weak handles and
+standard shared/weak handles **16 bytes**. A compile-time assertion checks that the
+view is pointer-sized and trivially copyable. Existing own shared control overhead
+is 72 bytes, with a **separate 40-byte group allocation** for each optional local
+owner group. No group was embedded or coallocated by this change. ABI sizes are
+implementation-specific, not promises for other platforms.
 
-The [untimed validation trace](../benchmarks/results/20261007_primary/lifetime_validation.txt) verifies both implementations:
+## Measurement controls
 
-1. Registry publishes version 2 while existing scene attachments still reference version 1
-2. A global frame lease keeps version 1 alive after scene release
-3. A worker thread drops the final shared frame lease and submits destruction to a mutex-protected, allocation-free fixed-capacity retirement queue
-4. Weak caches immediately expire and cannot relock, while payload destruction remains delayed
-5. Advancing a simulated completion fence from 2 to 3 destroys version 1 exactly once; registry/cache release and fence 6 retire version 2 exactly once
+- Five warmup rounds, then 101 measured rounds; the order of all cases is shuffled each round with seed `0xC0FFEE`. No samples are trimmed
+- A thread is created and joined before timing. The recorded glibc flag is `__libc_single_threaded == 0`, keeping libstdc++ on its multithreaded reference-count path
+- Matched implementations use the same deterministic asset reads and matching per-case checksums. Temporary handles escape through a compiler memory barrier to resist elision. Parameter cases add the same explicit non-inlined boundary. No LTO is used
+- Factory cases separately include creation and final destruction. The root remains alive in copy/parameter tests. The original lifecycle case includes registry construction, optional local-group setup, 4,096 owning scene attachments, hot reload, expired weak cache and unload
+- The historical frame comparison deduplicates to one global lease per resource and borrows existing scene owners on both sides. It does not charge std an unnecessary owning copy per draw
+- Two persistent contending workers copy one shared control block. Their reported per-copy values divide aggregate elapsed time by **both workers' combined operations** and include barrier dispatch/completion; these are throughput-normalized batch costs, not per-thread latency
+- Median/p95/p99 use nearest-rank quantiles over batch-normalized elapsed samples. They are not individual copy, job, frame, GPU, or real-time worst-case latency distributions. With 101 samples, tail resolution is limited
 
-The queue has 256 slots and terminates on overflow. It is a demonstration of the `noexcept` retirement contract, not a production queue/backpressure strategy. Its mutex acquisition and destructor callbacks are not bounded real-time operations. Queue and allocator contexts must outlive all retained tasks/weak owners. Shutdown must eventually drain retirement tasks.
+## Lifetime and sanitizer validation
 
-The std deferred baseline uses a custom deleter with separate payload/control allocations, since `std::make_shared` cannot accept a custom deleter. **Deferred-destruction validation is untimed**, so this representation difference is not hidden inside the reported ownership timings. The normal timed std factory is `std::make_shared`, and own factories coallocate payload/control.
+The [untimed validation trace](../benchmarks/results/20261007_view_primary/lifetime_validation.txt)
+retains the old hot-reload/frame-lease/weak-expiration/deferred-destruction sequence
+and adds matched own/std scope-pin checks:
 
-No renderer, asset I/O, ECS, actual GPU, graphics API fence, real resource reclamation, cache working set sweep or target engine was integrated. A correct smart pointer does not solve GPU completion or make unsynchronized payload access safe. Local aliases may not be copied, moved, used or destroyed on another thread; share first, then localize on the receiving worker.
+- Publishing asset version 2 does not invalidate independently owned version 1 scene attachments
+- A global frame lease retains version 1 after scene release; a worker releases the final lease into a fixed-capacity, mutex-protected retirement queue
+- Weak locks fail after the last strong owner disappears, while actual destruction waits until the simulated fence is advanced
+- One ordinary shared pin retains the payload after the sole original owner resets; copied views do not change its strong count; a weak owner is locked before borrowing; the last pin destroys the payload exactly once
 
-## Verification
+The retirement queue has 256 slots and terminates on overflow. Its mutex and
+callbacks are not bounded real-time operations. Queue/allocator contexts must
+outlive their tasks and weak owners, and shutdown must drain outstanding work.
+Deferred std validation uses a custom deleter with separate payload/control
+storage because `std::make_shared` cannot take that deleter. This validation is
+untimed; normal timed std factories use `std::make_shared`.
 
-The final benchmark source also passed an ASan+UBSan smoke (3 rounds, 1 warmup, 1,000 iterations) with debug thread checks enabled. See [its metadata](../benchmarks/results/sanitizer_validation/metadata.txt) and [status](../benchmarks/results/sanitizer_validation/status.txt). `ASAN_OPTIONS=detect_leaks=0` was necessary: an earlier LeakSanitizer run failed because the execution environment uses ptrace. **LeakSanitizer leak detection is unverified**; the explicit allocation and destructor checks are not a substitute for it. Sanitizer timings are not performance evidence.
+The final header and 56-case harness passed **ASan+UBSan**, with debug local-owner
+thread checks enabled, three samples, one warmup, 1,000 iterations:
+[status](../benchmarks/results/20261007_view_sanitizer/status.txt),
+[complete log](../benchmarks/results/20261007_view_sanitizer/driver.log),
+[metadata/source hashes](../benchmarks/results/20261007_view_sanitizer/metadata.txt).
+The benchmark also compiles with `-Werror` and default raw-access warnings enabled.
+
+Leak detection was rechecked with `ASAN_OPTIONS=detect_leaks=1`. That run failed at
+process exit because LeakSanitizer reports that it does not work under ptrace:
+[matching environment diagnostic from the test run](../tests/results/asan-default.log),
+[exit status](../benchmarks/results/20261007_view_sanitizer_leaks_enabled/status.txt).
+The leak-enabled benchmark driver log is not part of the published artifacts;
+its exit status and measured output remain available. The passing ASan+UBSan run
+uses `detect_leaks=0`. **LeakSanitizer leak detection
+remains unverified**; explicit allocation/destructor checks do not replace it.
+Sanitizer timings are not performance evidence.
