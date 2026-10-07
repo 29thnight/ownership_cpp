@@ -186,12 +186,20 @@ Relaxed count queries are advisory snapshots only. No reference-count operation
 substitutes for publishing a handle safely or for synchronizing accesses to the
 payload.
 
-The last release deliberately does not load the word before decrementing to skip
-both read-modify-writes when the object was never shared, as libstdc++ does.
-Measured, that load made creating and destroying a never-shared object as cheap
-as the standard library but cost 24% on uncontended copies and 31-40% on
-contended ones, the operations shared ownership exists for. A never-shared
-object is better owned by `unique_owner`. See [the count-layout report](benchmark_counts.md).
+Loading the word before every decrement to skip both read-modify-writes when the
+object was never shared, as libstdc++ does, makes creation and destruction as
+cheap as the standard library but was measured to cost 24% on uncontended copies
+and 31-40% on contended ones, because copies' releases pay for it too. The check
+is therefore confined to the one handle that can plausibly be the sole reference:
+a factory sets a hint in the low bit of the handle's block address, moves carry
+it and copies clear it. Only a hinted handle loads the word on release; when it
+reads one strong reference and only the implicit weak, no other owner, observer
+or registration exists and none can appear, so it retires the count with a plain
+store. Otherwise, and for every unhinted handle, the release is one `fetch_sub`.
+The hint selects a path and never decides: a hinted handle whose object was
+copied or observed still decrements, so a stale hint costs one load. The hinted
+path is out of line and the common decrement is laid out as the likely branch.
+See [the count-layout report](benchmark_counts.md).
 
 ## Weak and deferred lifetime
 

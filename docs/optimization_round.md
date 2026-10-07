@@ -80,18 +80,43 @@ and the pinned scaling harness shows no change (two threads 113 → 104 ns, four
 threads 263 → 249 ns). With a coefficient of variation of 0.2-0.3 in this unpinned
 case, the difference is attributed to run-to-run noise.
 
+## Follow-up: both fast creation and fast copies
+
+The trade-off above came from checking the counts on every release. A follow-up
+(`6a6455f`) checks only on the handle a factory returned: a hint in the low bit
+of its block address, carried by moves and cleared by copies, so copies keep a
+single `fetch_sub` release. Main harness, 101 samples x 2, against the head
+above ([primary](../benchmarks/results/hint_main_primary/summary.csv),
+[repeat](../benchmarks/results/hint_main_repeat/summary.csv)):
+
+| Case | Before | After | own/std after |
+|---|---:|---:|---:|
+| `make_shared` create/read/destroy | 17.99 / 17.88 | **12.59 / 12.64** | **1.00 / 1.00** |
+| copy_read_drop (shared) | 13.19 / 13.17 | **11.28 / 11.26** | 0.67 / 0.67 |
+| group setup + 64 copies | 89.16 / 89.54 | 74.38 / 77.38 | 0.07 / 0.07 |
+| `make_local` create/read/destroy | 13.44 / 13.49 | 15.31 / 15.35 | 1.21 / 1.22 |
+| independent_owner_parameter (shared) | 13.16 / 13.12 | 14.74 / 14.69 | 0.88 / 0.88 |
+| scene_4096_attachments | 1.31 / 1.39 | 1.51 / 1.46 | 0.16 / 0.15 |
+
+The pinned scaling harness confirms copies did not slow under contention (four
+threads 249 -> 210 ns, one thread 13.6 -> 12.4 ns), and the layout harness has
+own's creation at 11.27 ns against std's 11.78.
+
+Three main-harness rows moved the wrong way. `make_local`'s generated code is
+byte-for-byte identical before and after (it never touches the hinted handle),
+and its change shrinks to +4% when both binaries are built with 64-byte function
+and loop alignment, so it follows code placement in this harness. The by-value
+parameter loop does differ (the copy masks the hint, the release tests it), but
+the same loop isolated in a pinned microbenchmark is 9% faster (16.2 -> 14.7 ns);
+in this harness it stays 12% slower and still beats std. `scene_4096_attachments`
+has ranged from 1.27 to 1.59 ns across earlier runs of unchanged code.
+
 ## What stays slower, and why
 
-- **`make_shared` create/read/destroy, 1.47x.** Own performs one locked decrement
-  when a never-shared object dies; libstdc++ skips it by loading the counts first.
-  That load was measured to cost 24% on uncontended and 31-40% on contended
-  copies ([count-layout report](benchmark_counts.md)); a write-intent prefetch
-  before the load did not help (contended copies still 45-60% slower, uncontended
-  +2.5 ns, because a load after a locked instruction waits for it). Never-shared
-  objects are better served by `unique_owner` or a local owner, both of which now
-  match or beat `std::make_shared` here.
-- **`make_local` create/read/destroy, 1.10x** (13.4 vs 12.2 ns): the group
-  initialization and its out-of-line release.
+- **`make_shared` create/read/destroy:** resolved by the follow-up above (1.00x).
+- **`make_local` create/read/destroy, 1.10-1.22x** (13.4-15.3 vs 12.2 ns): the
+  group initialization and its out-of-line release, plus code placement in the
+  main harness (see the follow-up).
 - **`async_queue_job_*_borrow_reads`, up to 1.10x:** own's times did not change
   (695/675 ns vs 719/679 ns before); the standard side measured faster in this
   run. These cases include a mutex and condition variable.

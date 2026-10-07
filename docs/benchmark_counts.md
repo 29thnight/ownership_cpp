@@ -94,6 +94,25 @@ both decrements of a never-shared object; the adopted header emits one `ldaddl`
 (release), an `ldar` only after the last strong release, and an `ldar` compare
 instead of the weak `ldaddal`.
 
+## Later revision: the check on the factory's handle only
+
+Variant A's cost came from running the check on every release, copies included.
+A later revision runs it only for the handle a factory returned (a hint in the
+low bit of its block address, carried by moves, cleared by copies). Main harness,
+101 samples, two processes, against the previous head:
+
+| Case | Before | After | own/std after |
+|---|---:|---:|---:|
+| `make_shared` create/read/destroy | 17.99 / 17.88 | **12.59 / 12.64** | 1.00 / 1.00 |
+| copy_read_drop | 13.19 / 13.17 | **11.28 / 11.26** | 0.67 / 0.67 |
+| scaling, shared copy/drop, 4 threads (pinned) | 249.12 | 209.53 | 0.60 |
+
+Data: [primary](../benchmarks/results/hint_main_primary/summary.csv),
+[repeat](../benchmarks/results/hint_main_repeat/summary.csv),
+[scaling](../benchmarks/results/hint_scaling/summary.csv),
+[layout](../benchmarks/results/hint_layout/summary.csv). Side effects and their
+analysis are in [the optimization round report](optimization_round.md).
+
 ## Limits
 
 - One 4-vCPU x86 VM; pinning removes migration but not hypervisor scheduling.
