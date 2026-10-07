@@ -23,6 +23,8 @@
 
 namespace own
 {
+    template<class T> class unique_owner;
+    template<class T> class allocated_unique_owner;
     template<class T> class local_owner;
     template<class T> class shared_owner;
     template<class T> class weak_owner;
@@ -55,6 +57,37 @@ namespace own
                 return;
             }
             ::operator delete(pointer);
+        }
+
+        template<class From, class To>
+        inline constexpr bool unique_conversion_allowed = []() noexcept
+        {
+            if constexpr (!std::is_convertible_v<From*, To*>)
+            {
+                return false;
+            }
+            else if constexpr (std::is_same_v<std::remove_cv_t<From>, std::remove_cv_t<To>>)
+            {
+                return true; // Qualification conversion keeps the same delete type.
+            }
+            else
+            {
+                // Unlike an erased owner, the default deletes through its view
+                // type. A polymorphic upcast must preserve valid destruction.
+                return std::has_virtual_destructor_v<To> && std::is_nothrow_destructible_v<To>;
+            }
+        }();
+
+        using unique_deallocate_function = void (*)(void*, void*, std::size_t, std::size_t) noexcept;
+        using unique_dispose_function = void (*)(void*, void*, unique_deallocate_function) noexcept;
+
+        template<class T>
+        void dispose_unique(void* storage, void* context, unique_deallocate_function deallocate) noexcept
+        {
+            // The concrete factory type and original allocation survive every
+            // adjusted base/const conversion of the owner handle.
+            static_cast<T*>(storage)->~T();
+            deallocate(context, storage, sizeof(T), alignof(T));
         }
 
         struct owner_registration_marker {};
@@ -327,9 +360,172 @@ namespace own
         T* pointer_ = nullptr;
         explicit constexpr local_view(T* pointer) noexcept : pointer_(pointer) {}
         template<class> friend class local_view;
+        template<class> friend class unique_owner;
+        template<class> friend class allocated_unique_owner;
         template<class> friend class shared_owner;
         template<class> friend class local_owner;
         template<class> friend class enable_owner_from_this;
+    };
+
+    // Default exclusive ownership is just one pointer. Typed new/delete supply
+    // destruction and allocation lookup without runtime allocator metadata.
+    template<class T>
+    class unique_owner
+    {
+        static_assert(std::is_object_v<T> && !std::is_array_v<T>);
+    public:
+        using element_type = T;
+        unique_owner() noexcept = default;
+        unique_owner(std::nullptr_t) noexcept {}
+        unique_owner(const unique_owner&) = delete;
+        unique_owner& operator=(const unique_owner&) = delete;
+        unique_owner(unique_owner&& other) noexcept
+            : pointer_(std::exchange(other.pointer_, nullptr))
+        {
+        }
+        template<class U> requires detail::unique_conversion_allowed<U, T>
+        unique_owner(unique_owner<U>&& other) noexcept
+            : pointer_(std::exchange(other.pointer_, nullptr))
+        {
+        }
+        ~unique_owner() { destroy(pointer_); }
+        unique_owner& operator=(unique_owner&& other) noexcept
+        {
+            unique_owner(std::move(other)).swap(*this);
+            return *this;
+        }
+        template<class U> requires detail::unique_conversion_allowed<U, T>
+        unique_owner& operator=(unique_owner<U>&& other) noexcept
+        {
+            unique_owner(std::move(other)).swap(*this);
+            return *this;
+        }
+        void reset() noexcept { destroy(std::exchange(pointer_, nullptr)); }
+        void swap(unique_owner& other) noexcept { std::swap(pointer_, other.pointer_); }
+#if OWN_ENABLE_UNSAFE_GET_WARNING
+        [[deprecated("Borrowed raw pointer: caller must preserve lifetime; do not delete or otherwise deallocate the returned pointer")]]
+#endif
+        T* unsafe_get() const & noexcept { return pointer_; }
+        T* unsafe_get() const && = delete;
+        [[nodiscard]] local_view<T> borrow() const & noexcept { return local_view<T>(pointer_); }
+        local_view<T> borrow() const && = delete;
+        explicit operator bool() const noexcept { return pointer_ != nullptr; }
+        T& operator*() const noexcept { return *pointer_; }
+        T* operator->() const noexcept { return pointer_; }
+
+    private:
+        T* pointer_ = nullptr;
+        static void destroy(T* pointer) noexcept
+        {
+            static_assert(sizeof(T) > 0, "unique_owner destruction requires a complete payload type");
+            static_assert(std::is_nothrow_destructible_v<T>, "owned destructors must be accessible and noexcept");
+            if (pointer) { delete pointer; }
+        }
+        explicit unique_owner(T* pointer) noexcept : pointer_(pointer) {}
+        template<class> friend class unique_owner;
+        friend struct detail::owner_access;
+    };
+
+    // Explicit allocator-aware ownership. Erased allocator/destruction state
+    // lives in this opt-in handle, never in the pointer-only default owner.
+    template<class T>
+    class allocated_unique_owner
+    {
+        static_assert(std::is_object_v<T> && !std::is_array_v<T>);
+    public:
+        using element_type = T;
+        allocated_unique_owner() noexcept = default;
+        allocated_unique_owner(std::nullptr_t) noexcept {}
+        allocated_unique_owner(const allocated_unique_owner&) = delete;
+        allocated_unique_owner& operator=(const allocated_unique_owner&) = delete;
+        allocated_unique_owner(allocated_unique_owner&& other) noexcept { take_from(other); }
+        template<class U> requires std::is_convertible_v<U*, T*>
+        allocated_unique_owner(allocated_unique_owner<U>&& other) noexcept { take_from(other); }
+        ~allocated_unique_owner() { reset(); }
+        allocated_unique_owner& operator=(allocated_unique_owner&& other) noexcept
+        {
+            allocated_unique_owner(std::move(other)).swap(*this);
+            return *this;
+        }
+        template<class U> requires std::is_convertible_v<U*, T*>
+        allocated_unique_owner& operator=(allocated_unique_owner<U>&& other) noexcept
+        {
+            allocated_unique_owner(std::move(other)).swap(*this);
+            return *this;
+        }
+        void reset() noexcept
+        {
+            if (!pointer_) { return; }
+            auto* storage = storage_;
+            auto* context = context_;
+            auto deallocate = deallocate_;
+            auto dispose = dispose_;
+            pointer_ = nullptr;
+            // Empty before callbacks; do not touch this again, because user
+            // cleanup may install a replacement owner through a saved handle.
+            dispose(storage, context, deallocate);
+        }
+        void swap(allocated_unique_owner& other) noexcept
+        {
+            if (pointer_ && other.pointer_)
+            {
+                std::swap(pointer_, other.pointer_);
+                std::swap(storage_, other.storage_);
+                std::swap(context_, other.context_);
+                std::swap(deallocate_, other.deallocate_);
+                std::swap(dispose_, other.dispose_);
+            }
+            else if (pointer_)
+            {
+                other.take_from(*this);
+            }
+            else if (other.pointer_)
+            {
+                take_from(other);
+            }
+        }
+#if OWN_ENABLE_UNSAFE_GET_WARNING
+        [[deprecated("Borrowed raw pointer: caller must preserve lifetime; do not delete or otherwise deallocate the returned pointer")]]
+#endif
+        T* unsafe_get() const & noexcept { return pointer_; }
+        T* unsafe_get() const && = delete;
+        [[nodiscard]] local_view<T> borrow() const & noexcept { return local_view<T>(pointer_); }
+        local_view<T> borrow() const && = delete;
+        explicit operator bool() const noexcept { return pointer_ != nullptr; }
+        T& operator*() const noexcept { return *pointer_; }
+        T* operator->() const noexcept { return pointer_; }
+
+    private:
+        // pointer_ is the sole ownership indicator. The four cleanup fields
+        // are meaningful/readable only when pointer_ is non-null.
+        T* pointer_ = nullptr;
+        void* storage_ = nullptr;
+        void* context_ = nullptr;
+        detail::unique_deallocate_function deallocate_ = nullptr;
+        detail::unique_dispose_function dispose_ = nullptr;
+
+        allocated_unique_owner(T* pointer, void* storage, allocator_ref allocator,
+                     detail::unique_dispose_function dispose) noexcept
+            : pointer_(pointer), storage_(storage), context_(allocator.context),
+              deallocate_(allocator.deallocate), dispose_(dispose)
+        {
+        }
+        template<class U>
+        void take_from(allocated_unique_owner<U>& other) noexcept
+        {
+            // Called only for a new or logically empty destination. Inactive
+            // cleanup fields may hold invalid pointer values after the old
+            // allocation/context dies: never copy/read them on an empty path.
+            pointer_ = other.pointer_;
+            if (!pointer_) { return; }
+            storage_ = other.storage_;
+            context_ = other.context_;
+            deallocate_ = other.deallocate_;
+            dispose_ = other.dispose_;
+            other.pointer_ = nullptr;
+        }
+        template<class> friend class allocated_unique_owner;
+        friend struct detail::owner_access;
     };
 
     template<class T>
@@ -731,6 +927,17 @@ namespace own
         struct owner_access
         {
             template<class T>
+            static unique_owner<T> adopt_unique(T* pointer) noexcept
+            {
+                return unique_owner<T>(pointer);
+            }
+            template<class T>
+            static allocated_unique_owner<T> adopt_allocated_unique(T* pointer, void* storage,
+                                                                   allocator_ref allocator) noexcept
+            {
+                return allocated_unique_owner<T>(pointer, storage, allocator, dispose_unique<T>);
+            }
+            template<class T>
             static shared_owner<T> adopt(control_block* block, T* pointer) noexcept
             {
                 return shared_owner<T>(block, pointer);
@@ -754,6 +961,36 @@ namespace own
                 owner.group_->block->retirement = hook;
             }
         };
+    }
+
+    template<class T, class... Args>
+    [[nodiscard]] allocated_unique_owner<T> allocate_unique(allocator_ref allocator, Args&&... args)
+    {
+        static_assert(std::is_object_v<T> && !std::is_array_v<T>);
+        static_assert(std::is_nothrow_destructible_v<T>, "owned destructors must be noexcept");
+        void* storage = detail::allocate_bytes(allocator, sizeof(T), alignof(T));
+        T* pointer;
+        try
+        {
+            pointer = ::new (storage) T(std::forward<Args>(args)...);
+        }
+        catch (...)
+        {
+            allocator.deallocate(allocator.context, storage, sizeof(T), alignof(T));
+            throw;
+        }
+        // Unique ownership does not create/register any shared or weak control.
+        return detail::owner_access::adopt_allocated_unique(pointer, storage, allocator);
+    }
+
+    template<class T, class... Args>
+    [[nodiscard]] unique_owner<T> make_unique(Args&&... args)
+    {
+        static_assert(std::is_object_v<T> && !std::is_array_v<T>);
+        static_assert(std::is_nothrow_destructible_v<T>, "owned destructors must be accessible and noexcept");
+        // Ordinary typed new/delete honor the same class-specific allocation
+        // functions, including language-provided constructor-failure cleanup.
+        return detail::owner_access::adopt_unique(new T(std::forward<Args>(args)...));
     }
 
     template<class T, class... Args>
@@ -826,6 +1063,8 @@ namespace own
         return own::allocate_local<T>({}, std::forward<Args>(args)...);
     }
 
+    template<class T> void swap(unique_owner<T>& a, unique_owner<T>& b) noexcept { a.swap(b); }
+    template<class T> void swap(allocated_unique_owner<T>& a, allocated_unique_owner<T>& b) noexcept { a.swap(b); }
     template<class T> void swap(local_view<T>& a, local_view<T>& b) noexcept { a.swap(b); }
     template<class T> void swap(shared_owner<T>& a, shared_owner<T>& b) noexcept { a.swap(b); }
     template<class T> void swap(local_owner<T>& a, local_owner<T>& b) noexcept { a.swap(b); }
