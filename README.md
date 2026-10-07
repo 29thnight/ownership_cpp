@@ -311,8 +311,10 @@ If a dependency needs the full standard pointer interface, using that interface
 there can be simpler than expanding this library preemptively.
 
 There is no full `std::unique_ptr` / `std::shared_ptr` parity. Arrays, `void` owners, aliasing ownership,
-atomic handle objects, owner-ordering/hashing, raw adoption, arbitrary payload
-deleters and an STL allocator-traits adapter are omitted. Payload destructors must
+atomic handle objects, owner-to-owner equality, ordering and hashing, raw adoption,
+arbitrary payload deleters and an STL allocator-traits adapter are omitted. Owners
+and views compare only with `nullptr` (`owner == nullptr`, `view != nullptr`);
+weak observers have no null comparison, use `expired()` or `lock()`. Payload destructors must
 be `noexcept`. Strong-reference cycles still need weak links.
 
 MIT; the original [LICENSE](LICENSE) is preserved.

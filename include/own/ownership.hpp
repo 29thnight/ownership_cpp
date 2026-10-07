@@ -449,6 +449,8 @@ namespace own
 #endif
         constexpr T* unsafe_get() const noexcept { return pointer_; }
         constexpr explicit operator bool() const noexcept { return pointer_ != nullptr; }
+        // Null comparison only; owners/views are never compared with each other or ordered.
+        friend constexpr bool operator==(const local_view& handle, std::nullptr_t) noexcept { return !handle; }
         constexpr T& operator*() const noexcept { return *pointer_; }
         constexpr T* operator->() const noexcept { return pointer_; }
         constexpr void reset() noexcept { pointer_ = nullptr; }
@@ -508,6 +510,8 @@ namespace own
         [[nodiscard]] local_view<T> borrow() const & noexcept { return local_view<T>(pointer_); }
         local_view<T> borrow() const && = delete;
         explicit operator bool() const noexcept { return pointer_ != nullptr; }
+        // Null comparison only; owners/views are never compared with each other or ordered.
+        friend bool operator==(const unique_owner& handle, std::nullptr_t) noexcept { return !handle; }
         T& operator*() const noexcept { return *pointer_; }
         T* operator->() const noexcept { return pointer_; }
 
@@ -590,6 +594,8 @@ namespace own
         [[nodiscard]] local_view<T> borrow() const & noexcept { return local_view<T>(pointer_); }
         local_view<T> borrow() const && = delete;
         explicit operator bool() const noexcept { return pointer_ != nullptr; }
+        // Null comparison only; owners/views are never compared with each other or ordered.
+        friend bool operator==(const allocated_unique_owner& handle, std::nullptr_t) noexcept { return !handle; }
         T& operator*() const noexcept { return *pointer_; }
         T* operator->() const noexcept { return pointer_; }
 
@@ -693,6 +699,8 @@ namespace own
         [[nodiscard]] local_view<T> borrow() const & noexcept { return local_view<T>(pointer_); }
         local_view<T> borrow() const && = delete;
         explicit operator bool() const noexcept { return pointer_ != nullptr; }
+        // Null comparison only; owners/views are never compared with each other or ordered.
+        friend bool operator==(const shared_owner& handle, std::nullptr_t) noexcept { return !handle; }
         T& operator*() const noexcept { return *pointer_; }
         T* operator->() const noexcept { return pointer_; }
         std::size_t use_count() const noexcept
@@ -790,6 +798,8 @@ namespace own
         }
         local_view<T> borrow() const && = delete;
         explicit operator bool() const noexcept { check_thread(); return pointer_ != nullptr; }
+        // Null comparison only; owners/views are never compared with each other or ordered. Uses the same thread check as operator bool.
+        friend bool operator==(const local_owner& handle, std::nullptr_t) noexcept { return !handle; }
         T& operator*() const noexcept { check_thread(); return *pointer_; }
         T* operator->() const noexcept { check_thread(); return pointer_; }
         std::size_t use_count() const noexcept
