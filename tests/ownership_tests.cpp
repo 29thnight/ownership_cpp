@@ -513,32 +513,61 @@ void initial_allocation_failures() {
 }
 
 void local_group_allocation_failures() {
+    // allocate_local places its first group inside the block: exactly one
+    // allocation, and failing it constructs nothing.
     for (bool null_failure : {false, true}) {
         counting_allocator allocation;
-        allocation.fail_at = 1;
+        allocation.fail_at = 0;
         allocation.return_null = null_failure;
         std::atomic<int> destroyed{0};
         expect_bad_alloc([&] {
             auto local = own::allocate_local<tracked>(allocation.ref(), destroyed);
             (void)local;
         });
-        CHECK(destroyed == 1);
+        CHECK(destroyed == 0);
         allocation.check_balanced();
     }
+    counting_allocator allocation;
+    allocation.fail_at = 1;
+    std::atomic<int> destroyed{0};
+    {
+        auto local = own::allocate_local<tracked>(allocation.ref(), destroyed);
+        CHECK(local && allocation.allocated == 1 && local.local_use_count() == 1);
+        auto copy = local;
+        auto shared = local.share();
+        CHECK(local.local_use_count() == 2 && shared.use_count() == 2);
+    }
+    CHECK(destroyed == 1);
+    allocation.check_balanced();
 }
 
 void failed_factory_does_not_retire() {
-    for (int failure_point : {0, 1}) {
+    {
         counting_allocator allocation;
-        allocation.fail_at = failure_point;
+        allocation.fail_at = 0;
         deferred_queue queue;
         std::atomic<int> destroyed{0};
         expect_bad_alloc([&] {
             auto local = own::allocate_local_with<tracked>(allocation.ref(), queue.hook(), destroyed);
             (void)local;
         });
-        CHECK(destroyed == failure_point);
+        CHECK(destroyed == 0);
         CHECK(queue.calls == 0 && !queue.pending);
+        allocation.check_balanced();
+    }
+    {
+        // One allocation; the hook sees the object exactly once, at last release.
+        counting_allocator allocation;
+        allocation.fail_at = 1;
+        deferred_queue queue;
+        std::atomic<int> destroyed{0};
+        {
+            auto local = own::allocate_local_with<tracked>(allocation.ref(), queue.hook(), destroyed);
+            CHECK(allocation.allocated == 1 && queue.calls == 0);
+        }
+        CHECK(queue.calls == 1 && queue.pending && destroyed == 0);
+        queue.pending.reset();
+        CHECK(destroyed == 1);
         allocation.check_balanced();
     }
     counting_allocator allocation;

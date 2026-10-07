@@ -143,11 +143,13 @@ void optional_local_owner_registration() {
         auto weak = alias->weak_from_this();
         auto borrowed = alias->local_from_this();
         CHECK(local.local_use_count() == 2 && local.use_count() == 2 && weak.use_count() == 2);
-        CHECK(borrowed->value == 73 && allocation.allocated == 2);
+        // The first group lives inside the block: one allocation in total.
+        CHECK(borrowed->value == 73 && allocation.allocated == 1);
     }
-    CHECK(observed.destroyed == 0 && escaped.use_count() == 1 && allocation.deallocated == 1);
+    // The escaped shared owner keeps the block (and the ended group's storage).
+    CHECK(observed.destroyed == 0 && escaped.use_count() == 1 && allocation.deallocated == 0);
     escaped.reset();
-    CHECK(observed.destroyed == 1 && observed.destructor_unbound && allocation.deallocated == 2);
+    CHECK(observed.destroyed == 1 && observed.destructor_unbound && allocation.deallocated == 1);
 }
 
 void const_factory_and_access() {
@@ -252,7 +254,7 @@ void deferred_expiry_never_resurrects() {
         CHECK(observed.destroyed == 1 && observed.destructor_unbound && !weak.lock());
         queue.pending.reset();
         weak.reset();
-        CHECK(allocation.allocated == (local ? 2 : 1));
+        CHECK(allocation.allocated == 1);
         CHECK(allocation.allocated == allocation.deallocated);
     }
 }
@@ -261,15 +263,16 @@ void failed_factory_cleans_registration() {
     observations observed;
     counting_allocator allocation;
     deferred_queue queue;
-    allocation.fail_at = 1; // Optional local-owner group allocation, after binding.
+    // Local factories allocate block, payload and first group at once, so no
+    // allocation can fail after registration: a failure constructs nothing.
+    allocation.fail_at = 0;
     bool caught = false;
     try {
         auto owner = own::allocate_local_with<self_owned>(allocation.ref(), queue.hook(), observed);
         (void)owner;
     } catch (const std::bad_alloc&) { caught = true; }
-    CHECK(caught && observed.constructor_unbound && observed.destructor_unbound);
-    CHECK(observed.destroyed == 1 && queue.calls == 0);
-    CHECK(allocation.allocated == 1 && allocation.deallocated == 1);
+    CHECK(caught && observed.destroyed == 0 && queue.calls == 0);
+    CHECK(allocation.allocated == 0 && allocation.deallocated == 0);
 
     struct throwing_self : own::enable_owner_from_this<throwing_self> {
         explicit throwing_self(bool& unbound) {
@@ -285,7 +288,7 @@ void failed_factory_cleans_registration() {
         (void)owner;
     } catch (const std::runtime_error&) { caught = true; }
     CHECK(caught && unbound && queue.calls == 0);
-    CHECK(allocation.allocated == 2 && allocation.deallocated == 2);
+    CHECK(allocation.allocated == 1 && allocation.deallocated == 1);
 }
 
 void concurrent_from_this_uses_original_block() {

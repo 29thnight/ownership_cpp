@@ -151,9 +151,10 @@ void retained_local_owner_access() {
         CHECK(read_parameter(constant) == 84);
         CHECK(std::addressof(*borrowed) == std::addressof(*alias));
         CHECK(owner.use_count() == 1 && owner.local_use_count() == 2);
-        CHECK(allocation.allocated == 2 && allocation.deallocated == 0 && destroyed == 0);
+        // Block, payload and first group share one allocation; borrowing adds none.
+        CHECK(allocation.allocated == 1 && allocation.deallocated == 0 && destroyed == 0);
     }
-    CHECK(destroyed == 1 && allocation.allocated == 2 && allocation.deallocated == 2);
+    CHECK(destroyed == 1 && allocation.allocated == 1 && allocation.deallocated == 1);
 }
 
 void views_never_prolong_lifetime() {
