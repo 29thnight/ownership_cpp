@@ -17,11 +17,17 @@
 #endif
 #endif
 
+#ifndef OWN_ENABLE_UNSAFE_GET_WARNING
+#define OWN_ENABLE_UNSAFE_GET_WARNING 1
+#endif
+
 namespace own
 {
     template<class T> class local_owner;
     template<class T> class shared_owner;
     template<class T> class weak_owner;
+    template<class T> class local_view;
+    template<class T> class enable_owner_from_this;
     class retirement_task;
 
     namespace detail
@@ -51,6 +57,7 @@ namespace own
             ::operator delete(pointer);
         }
 
+        struct owner_registration_marker {};
         struct control_block;
         struct owner_access;
         void release_strong(control_block*) noexcept;
@@ -294,6 +301,37 @@ namespace own
         }
     }
 
+    // Non-owning access only. Copying a view does not retain or inspect any
+    // ownership record. The caller keeps an owner alive for every use.
+    template<class T>
+    class local_view
+    {
+        static_assert(std::is_object_v<T> && !std::is_array_v<T>);
+    public:
+        using element_type = T;
+        constexpr local_view() noexcept = default;
+        constexpr local_view(std::nullptr_t) noexcept {}
+        template<class U> requires std::is_convertible_v<U*, T*>
+        constexpr local_view(const local_view<U>& other) noexcept : pointer_(other.pointer_) {}
+#if OWN_ENABLE_UNSAFE_GET_WARNING
+        [[deprecated("Borrowed raw pointer: caller must preserve lifetime; do not delete or otherwise deallocate the returned pointer")]]
+#endif
+        constexpr T* unsafe_get() const noexcept { return pointer_; }
+        constexpr explicit operator bool() const noexcept { return pointer_ != nullptr; }
+        constexpr T& operator*() const noexcept { return *pointer_; }
+        constexpr T* operator->() const noexcept { return pointer_; }
+        constexpr void reset() noexcept { pointer_ = nullptr; }
+        constexpr void swap(local_view& other) noexcept { std::swap(pointer_, other.pointer_); }
+
+    private:
+        T* pointer_ = nullptr;
+        explicit constexpr local_view(T* pointer) noexcept : pointer_(pointer) {}
+        template<class> friend class local_view;
+        template<class> friend class shared_owner;
+        template<class> friend class local_owner;
+        template<class> friend class enable_owner_from_this;
+    };
+
     template<class T>
     class shared_owner
     {
@@ -353,7 +391,13 @@ namespace own
             std::swap(block_, other.block_);
             std::swap(pointer_, other.pointer_);
         }
-        T* get() const noexcept { return pointer_; }
+#if OWN_ENABLE_UNSAFE_GET_WARNING
+        [[deprecated("Borrowed raw pointer: caller must preserve lifetime; do not delete or otherwise deallocate the returned pointer")]]
+#endif
+        T* unsafe_get() const & noexcept { return pointer_; }
+        T* unsafe_get() const && = delete;
+        [[nodiscard]] local_view<T> borrow() const & noexcept { return local_view<T>(pointer_); }
+        local_view<T> borrow() const && = delete;
         explicit operator bool() const noexcept { return pointer_ != nullptr; }
         T& operator*() const noexcept { return *pointer_; }
         T* operator->() const noexcept { return pointer_; }
@@ -440,10 +484,20 @@ namespace own
             std::swap(group_, other.group_);
             std::swap(pointer_, other.pointer_);
         }
-        T* get() const noexcept { check_thread(); return pointer_; }
-        explicit operator bool() const noexcept { return get() != nullptr; }
-        T& operator*() const noexcept { return *get(); }
-        T* operator->() const noexcept { return get(); }
+#if OWN_ENABLE_UNSAFE_GET_WARNING
+        [[deprecated("Borrowed raw pointer: caller must preserve lifetime; do not delete or otherwise deallocate the returned pointer")]]
+#endif
+        T* unsafe_get() const & noexcept { check_thread(); return pointer_; }
+        T* unsafe_get() const && = delete;
+        [[nodiscard]] local_view<T> borrow() const & noexcept
+        {
+            check_thread();
+            return local_view<T>(pointer_);
+        }
+        local_view<T> borrow() const && = delete;
+        explicit operator bool() const noexcept { check_thread(); return pointer_ != nullptr; }
+        T& operator*() const noexcept { check_thread(); return *pointer_; }
+        T* operator->() const noexcept { check_thread(); return pointer_; }
         std::size_t use_count() const noexcept
         {
             check_thread();
@@ -612,6 +666,64 @@ namespace own
         detail::control_block* block_ = nullptr;
         T* pointer_ = nullptr;
         template<class> friend class weak_owner;
+        template<class> friend class enable_owner_from_this;
+    };
+
+    // Registration is factory-only. This weak reference never owns the object.
+    // Copy/move construction starts unregistered; assignment keeps the target's
+    // registration, just as assigning payload must not replace its owner block.
+    template<class T>
+    class enable_owner_from_this : public detail::owner_registration_marker
+    {
+        static_assert(std::is_object_v<T> && !std::is_array_v<T>);
+    public:
+        [[nodiscard]] shared_owner<T> shared_from_this() noexcept { return weak_.lock(); }
+        [[nodiscard]] shared_owner<const T> shared_from_this() const noexcept { return weak_.lock(); }
+        [[nodiscard]] weak_owner<T> weak_from_this() noexcept { return weak_; }
+        [[nodiscard]] weak_owner<const T> weak_from_this() const noexcept { return weak_; }
+        [[nodiscard]] local_view<T> borrow_from_this() & noexcept
+        {
+            return weak_.expired() ? local_view<T>() : local_view<T>(weak_.pointer_);
+        }
+        [[nodiscard]] local_view<const T> borrow_from_this() const & noexcept
+        {
+            return weak_.expired() ? local_view<const T>() : local_view<const T>(weak_.pointer_);
+        }
+        local_view<T> borrow_from_this() && = delete;
+        local_view<const T> borrow_from_this() const && = delete;
+        [[nodiscard]] local_view<T> local_from_this() & noexcept { return borrow_from_this(); }
+        [[nodiscard]] local_view<const T> local_from_this() const & noexcept { return borrow_from_this(); }
+        local_view<T> local_from_this() && = delete;
+        local_view<const T> local_from_this() const && = delete;
+
+    protected:
+        constexpr enable_owner_from_this() noexcept = default;
+        enable_owner_from_this(const enable_owner_from_this&) noexcept {}
+        enable_owner_from_this(enable_owner_from_this&&) noexcept {}
+        enable_owner_from_this& operator=(const enable_owner_from_this&) noexcept { return *this; }
+        enable_owner_from_this& operator=(enable_owner_from_this&&) noexcept { return *this; }
+        ~enable_owner_from_this() = default;
+
+    private:
+        mutable weak_owner<T> weak_;
+        friend const enable_owner_from_this* owner_from_this_base(
+            detail::control_block*, const enable_owner_from_this* base) noexcept
+        {
+            return base;
+        }
+        template<class U>
+        void accept_owner(detail::control_block* block, U* object) const noexcept
+        {
+            static_assert(std::is_convertible_v<std::remove_cv_t<U>*, T*>,
+                          "enable_owner_from_this must name a public unambiguous object base");
+            if (weak_.block_) { detail::fail_fast(); }
+            // Const factories bind the same registration; their const member
+            // accessors expose only const ownership/views, as expected.
+            weak_.pointer_ = const_cast<std::remove_cv_t<U>*>(object);
+            weak_.block_ = block;
+            detail::increment(block->weak);
+        }
+        friend struct detail::owner_access;
     };
 
     namespace detail
@@ -622,6 +734,19 @@ namespace own
             static shared_owner<T> adopt(control_block* block, T* pointer) noexcept
             {
                 return shared_owner<T>(block, pointer);
+            }
+            template<class T>
+            static void bind_from_this(control_block* block, T* object) noexcept
+            {
+                if constexpr (std::is_base_of_v<owner_registration_marker, std::remove_cv_t<T>>)
+                {
+                    static_assert(requires { owner_from_this_base(block, object); },
+                                  "enable_owner_from_this must be a single public unambiguous base");
+                    if constexpr (requires { owner_from_this_base(block, object); })
+                    {
+                        owner_from_this_base(block, object)->accept_owner(block, object);
+                    }
+                }
             }
             template<class T>
             static void set_retirement(local_owner<T>& owner, retirement_hook hook) noexcept
@@ -649,6 +774,7 @@ namespace own
             allocator.deallocate(allocator.context, storage, sizeof(block_type), alignof(block_type));
             throw;
         }
+        detail::owner_access::bind_from_this(block, block->pointer());
         return detail::owner_access::adopt(block, block->pointer());
     }
 
@@ -700,6 +826,7 @@ namespace own
         return own::allocate_local<T>({}, std::forward<Args>(args)...);
     }
 
+    template<class T> void swap(local_view<T>& a, local_view<T>& b) noexcept { a.swap(b); }
     template<class T> void swap(shared_owner<T>& a, shared_owner<T>& b) noexcept { a.swap(b); }
     template<class T> void swap(local_owner<T>& a, local_owner<T>& b) noexcept { a.swap(b); }
     template<class T> void swap(weak_owner<T>& a, weak_owner<T>& b) noexcept { a.swap(b); }

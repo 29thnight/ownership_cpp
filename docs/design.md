@@ -1,6 +1,47 @@
 # Ownership and lifetime design
 
-## Two levels of strong ownership
+## Primary vocabulary: own the scope, borrow the access
+
+`shared_owner<T>` provides an independent lifetime guarantee. Use it for stored
+ownership, async handoff, and a scope whose source owner might reset. There is no
+privileged original/root owner: every remaining strong reference has the same
+lifetime authority.
+
+`local_view<T>` is a pointer-sized, trivially copyable borrowed view. It contains
+only `T*`: no control-block pointer, count, allocation, weak observation, thread ID,
+or guard ownership. `owner.borrow()` and view copies do not update reference
+counts. A view does not expire automatically; its non-null state is not proof that
+an object remains alive. Its lifetime is the caller's responsibility.
+
+If an owner already covers a synchronous function/loop, simply borrow from it.
+If that owner might reset, copy one shared owner into a scope pin and borrow from
+the pin. Copying each view does not copy the pin. A callback/job whose lifetime is
+independent captures a shared owner, then borrows during execution.
+
+A const `shared_owner<T>&` behaves like a const pointer handle, not a pointer to a
+const payload: its borrowed type remains `local_view<T>`. Use `shared_owner<const T>`
+or convert a view to `local_view<const T>` when immutable access is required.
+
+There is deliberately no automatic view-to-owner promotion. Views and owners have
+different contracts, so their timings must be compared with equivalent contracts:
+retained shared ownership plus raw/reference borrows for views, and independent
+owning handles for ownership-copy measurements.
+
+Named raw extraction uses `unsafe_get()`, with the configured deprecation warning.
+The previous `get()` API is removed. Owners' `borrow()` and `unsafe_get()` are
+lvalue-only; their const-rvalue overloads are deleted. This prevents a common
+immediately-dangling expression, not every possible reference escape. `*` and `->`
+remain usable for normal full-expression access. Always check weak lock success.
+C++ permits retaining returned references and explicit operator calls, so it does
+not offer a complete lifetime checker here. Even converting a borrowed view to a
+virtual base needs the pointed-to object alive during pointer adjustment.
+
+A view itself has no thread-affinity check. Moving/copying it does not touch a
+local ownership group. Any cross-thread borrowed use requires an externally
+retained lifetime and correct publication/payload synchronization. Do not infer
+thread safety merely from its pointer-sized representation.
+
+## Optional two-level strong ownership
 
 A coallocated control block holds atomic `strong` and `weak` counters, destruction
 function pointers, allocation callbacks, and an optional retirement hook. Every
@@ -64,16 +105,96 @@ thread in debug builds; ordinary local copies perform no global atomic operation
 Debug check configuration must be uniform across a program's translation units.
 There is no guarantee across unloadable/reloadable dynamic-library boundaries.
 
+## Ownership from this
+
+`enable_owner_from_this<T>` contains one weak registration and an empty marker
+base. It never owns the object. Factories finish construction before binding this
+registration to their existing control block and the appropriately adjusted `T*`.
+No raw `this` adoption or second control block is possible through the public API.
+Binding is initialization, not a concurrent registration protocol: do not publish
+`this` to another thread from its constructor and race a from-this call with factory
+binding. Publish only after the factory returns, through normal synchronization.
+
+The marker detects inheritance even when it is private or ambiguous; hidden-friend
+lookup then requires exactly one accessible, unambiguous enabling base. The type
+named by the mixin must be an accessible, unambiguous base of the factory type.
+Public inherited `enable_owner_from_this<Base>` through a derived object and
+virtual inheritance are supported. Unsupported/private/ambiguous/mismatched
+registration is a compile-time factory error.
+
+Methods return mutable or const results matching the receiver:
+
+- `shared_from_this()` locks the registered weak reference
+- `weak_from_this()` copies a weak observer
+- `borrow_from_this()` and `local_from_this()` return a non-owning view when the
+  registration currently has a nonzero strong count, otherwise an empty view
+
+The last operation performs one relaxed atomic strong-count load through the
+registered weak reference. It does not increment a count or pin the object;
+ordinary `owner.borrow()` and view copies do not even read a count. Its caller must
+already guarantee the object's lifetime; it is not a replacement for `weak.lock()`.
+Calling any member through a dangling `this` is already invalid; empty-result
+handling applies only when the object itself is still alive. A temporary locked
+owner cannot cover borrowed use beyond that temporary's lifetime.
+Both view methods reject rvalue object receivers. Unmanaged objects and constructor
+calls are unregistered and yield empty results. A weak handle captured before
+binding stays empty afterward. In normal/deferred destruction the strong count is
+already zero, so methods cannot resurrect the object or manufacture valid access.
+At that point shared owners/views returned are empty, while `weak_from_this()` can
+still return an expired observer that retains control storage.
+
+Copy/move constructors leave the new mixin unregistered. Copy/move assignment does
+not change the target registration. A factory-created copy/move registers its new
+object with its own block; the source's registration remains with the source.
+Const factories retain internal registration but expose const access via their
+const receiver methods. Owned mixin objects must not replace their own lifetime
+with placement construction while handles exist, just as ordinary owned objects
+must not do so.
+
+Registration adds one external weak reference. During final payload destruction,
+the mixin's weak member is destroyed before the implicit weak reference is dropped;
+the block therefore cannot disappear underneath the destructor. Deferred tasks
+retain the implicit weak reference until payload destruction completes. A failed
+local-group allocation after successful payload construction follows the same
+safe cleanup path, with no user retirement hook installed for the failed factory.
+
+## Allocation and retirement contracts
+
+`make_shared` uses one coallocated payload/control allocation. Optional `make_local`
+still uses a second local-group allocation; no embedded group or lazy promotion
+optimization is part of this revision. Every nonempty `localize()` allocates a new
+group, even when another group already exists on the same thread.
+
+An `allocator_ref` contains a context and byte allocate/deallocate callbacks.
+Return suitably aligned storage or throw; null becomes `std::bad_alloc`.
+Deallocate is `noexcept` and receives the exact original size/alignment. Allocator
+contexts are non-owning and must outlive their allocations, including weak tails
+and retirement tasks. A global control block can be freed on any releasing thread.
+`allocate_local` uses its allocator for both allocations; `shared.localize()` uses
+the default group allocator unless one is supplied explicitly.
+
+A `retirement_hook` receives one move-only task at final strong release. Its
+callback is `noexcept` and must run or retain the task using a defined queue-full
+policy. Dropping/replacing a task runs it; running twice is harmless. The task may
+cross threads through a synchronized queue, but payload teardown happens on the
+thread running/dropping it. The engine must choose and enforce any device-thread
+requirement, real fence association, and shutdown drain policy. The callback
+context must remain alive through callback completion; deferred task/allocator
+storage must remain valid until final release. No actual GPU operation is implied.
+
 ## Recommended engine flow
 
 - Asset database/cache: shared owners for owned entries, weak owners for optional
   observation. Removing the cache entry releases only that cache's ownership
-- Scene load: localize each resource once on the scene's pinned thread, then local
-  copy into component handles. Duplicates reuse the existing scene-local group
+- Scene load: keep shared owners for resources whose lifetime the scene controls.
+  Pass views/references for ordinary access. If individual stored local copies
+  truly need independent lifetimes on a pinned thread, optionally reuse one
+  `local_owner` group per resource
 - Frame gathering: deduplicate resource identities/version IDs before acquiring
   frame leases; a frame should not copy a global owner once per draw packet
-- Async work: enqueue shared leases. Localize after dequeue, copy locally during
-  execution, and destroy every local copy on that worker before leaving it
+- Async work: enqueue shared leases and borrow while the dequeued owner remains
+  alive. Use optional local ownership only if independent local alias lifetimes
+  are actually needed; destroy all such owners on their group's original thread
 - Migrating tasks and cancellation: keep a shared owner in the queued closure.
   No local owner may be captured in a closure whose destruction thread can change
 - Hot reload: publish a new immutable version, retain old-version owners for
@@ -89,7 +210,8 @@ context lifetime, and cross-thread deallocation requirements.
 
 ## Validation scope
 
-Testing includes ordinary and converting ownership, weak lifetime races, failure
+Testing includes owner/view contract separation, this registration, ordinary and
+converting ownership, weak lifetime races, failure
 injection, deferred retirement, compile-time interface boundaries, multiple
 translation units, and thread misuse diagnostics. Sanitizer support depends on
 what the execution environment permits. A passing stress suite is evidence, not

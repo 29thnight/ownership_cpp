@@ -28,6 +28,8 @@ example:
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -pthread -Iinclude examples/asset_workflow.cpp -o build/asset_workflow
 	./build/asset_workflow
+	$(CXX) $(CXXFLAGS) -pthread -Iinclude examples/owner_from_this.cpp -o build/owner_from_this
+	./build/owner_from_this
 
 clean:
 	rm -rf build benchmarks/.build

@@ -53,19 +53,19 @@ int main()
     own::retirement_hook hook{&queue, retirement_queue::retire};
     auto cache = own::make_shared_with<asset>(hook, 1, &destroyed);
     own::weak_owner<const asset> observed(cache);
-    auto scene = cache.localize();
-    auto component = scene;
+    auto scene = cache; // scene owns; component merely borrows
+    auto component = scene.borrow();
 
-    std::thread worker([lease = scene.share()]() mutable
+    std::thread worker([lease = scene]() mutable
     {
-        auto local = std::move(lease).localize();
+        auto local = lease.borrow(); // lease owns the whole worker scope
         auto operation = local;
         assert(operation->version == 1);
     });
     cache = own::make_shared_with<asset>(hook, 2, &destroyed); // hot reload
     assert(component->version == 1); // old scene still has old data
+    component.reset(); // discard borrowed access before its lifetime ends
     scene.reset();
-    component.reset();
     worker.join();
     assert(observed.expired());
     assert(!observed.lock());
