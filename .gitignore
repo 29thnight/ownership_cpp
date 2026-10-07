@@ -1,0 +1,6 @@
+/build/
+*.o
+core
+core.*
+
+/benchmarks/.build/
