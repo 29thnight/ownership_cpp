@@ -162,31 +162,36 @@ namespace own
             if (previous == 0 || previous >= saturation_limit) [[unlikely]] { fail_fast(); }
         }
 
+        using deallocate_function = void (*)(void*, void*, std::size_t, std::size_t) noexcept;
+
+        // Per-block-type operations, one static table per instantiation, so a
+        // block header stores a single pointer instead of every callback.
+        struct control_ops
+        {
+            void (*dispose)(control_block*) noexcept;
+            void (*destroy)(control_block*) noexcept;
+            // Null for compact blocks, which have no retirement hook.
+            retirement_hook* (*retirement)(control_block*) noexcept;
+        };
+
+        // The common header: 3 words. Allocator and retirement state live only
+        // in the extended block used by allocate_* and *_with factories.
         struct control_block
         {
             std::atomic<std::size_t> strong{1};
             // One implicit weak reference covers the entire live or retired
             // object lifetime, plus one per external weak_owner.
             std::atomic<std::size_t> weak{1};
-            allocator_ref allocator;
-            retirement_hook retirement;
-            void (*dispose)(control_block*) noexcept;
-            void (*destroy)(control_block*) noexcept;
+            const control_ops* ops;
 
-            control_block(allocator_ref resource, retirement_hook hook,
-                          void (*dispose_object)(control_block*) noexcept,
-                          void (*destroy_control)(control_block*) noexcept) noexcept
-                : allocator(resource), retirement(hook), dispose(dispose_object),
-                  destroy(destroy_control)
-            {
-            }
+            explicit control_block(const control_ops* operations) noexcept : ops(operations) {}
         };
 
         inline void release_weak(control_block* block) noexcept
         {
             if (block->weak.fetch_sub(1, std::memory_order_acq_rel) == 1)
             {
-                block->destroy(block);
+                block->ops->destroy(block);
             }
         }
 
@@ -196,7 +201,8 @@ namespace own
             {
                 // Zero is permanent. Keeping the implicit weak alive permits
                 // deferred destruction without successful weak locking.
-                auto hook = block->retirement;
+                retirement_hook hook;
+                if (auto* hook_of = block->ops->retirement) { hook = *hook_of(block); }
                 retirement_task task(block);
                 if (hook.retire) { hook.retire(hook.context, std::move(task)); }
             }
@@ -226,14 +232,20 @@ namespace own
             return result;
         }
 
+        template<class Block>
+        inline constexpr control_ops ops_for{Block::dispose_object, Block::destroy_control,
+                                             Block::retirement_of};
+
+        // make_shared/make_local: default allocator, no hook. Header plus payload
+        // only, laid out like the standard library's in-place block.
         template<class T>
         struct in_place_control final : control_block
         {
             alignas(T) unsigned char storage[sizeof(T)];
 
             template<class... Args>
-            in_place_control(allocator_ref allocator, retirement_hook hook, Args&&... args)
-                : control_block(allocator, hook, dispose_object, destroy_control)
+            explicit in_place_control(Args&&... args)
+                : control_block(&ops_for<in_place_control>)
             {
                 ::new (static_cast<void*>(storage)) T(std::forward<Args>(args)...);
             }
@@ -247,10 +259,47 @@ namespace own
             static void destroy_control(control_block* base) noexcept
             {
                 auto* block = static_cast<in_place_control*>(base);
-                auto allocator = block->allocator;
                 block->~in_place_control();
-                allocator.deallocate(allocator.context, block, sizeof(in_place_control),
-                                     alignof(in_place_control));
+                default_deallocate(nullptr, block, sizeof(in_place_control), alignof(in_place_control));
+            }
+            static constexpr retirement_hook* (*retirement_of)(control_block*) noexcept = nullptr;
+        };
+
+        // allocate_* and *_with factories: carries the deallocation callback and
+        // retirement hook. The allocate callback is not needed after allocation.
+        template<class T>
+        struct allocated_control final : control_block
+        {
+            void* context;
+            deallocate_function deallocate;
+            retirement_hook retirement;
+            alignas(T) unsigned char storage[sizeof(T)];
+
+            template<class... Args>
+            allocated_control(allocator_ref allocator, retirement_hook hook, Args&&... args)
+                : control_block(&ops_for<allocated_control>), context(allocator.context),
+                  deallocate(allocator.deallocate), retirement(hook)
+            {
+                ::new (static_cast<void*>(storage)) T(std::forward<Args>(args)...);
+            }
+
+            T* pointer() noexcept { return std::launder(reinterpret_cast<T*>(storage)); }
+
+            static void dispose_object(control_block* base) noexcept
+            {
+                static_cast<allocated_control*>(base)->pointer()->~T();
+            }
+            static void destroy_control(control_block* base) noexcept
+            {
+                auto* block = static_cast<allocated_control*>(base);
+                auto* resource = block->context;
+                auto release = block->deallocate;
+                block->~allocated_control();
+                release(resource, block, sizeof(allocated_control), alignof(allocated_control));
+            }
+            static retirement_hook* retirement_of(control_block* base) noexcept
+            {
+                return &static_cast<allocated_control*>(base)->retirement;
             }
         };
 
@@ -280,14 +329,16 @@ namespace own
         {
             std::size_t references = 1;
             control_block* block;
-            allocator_ref allocator;
+            // Only what release() needs: 2 words rather than a whole allocator_ref.
+            void* context;
+            deallocate_function deallocate;
             // Present in every configuration: translation units that disagree on
             // NDEBUG/OWN_DEBUG_THREAD_CHECK must still agree on size and offsets,
             // because groups are allocated, read and freed across them. Zero means
             // the group was created without checks; such a group is never checked.
             const std::size_t thread_id = OWN_DEBUG_THREAD_CHECK ? current_thread_id() : 0;
             local_group(control_block* control, allocator_ref resource) noexcept
-                : block(control), allocator(resource)
+                : block(control), context(resource.context), deallocate(resource.deallocate)
             {
             }
             void check_thread() const noexcept
@@ -308,10 +359,10 @@ namespace own
                 if (--references == 0)
                 {
                     auto* control = block;
-                    auto resource = allocator;
+                    auto* resource = context;
+                    auto release_storage = deallocate;
                     this->~local_group();
-                    resource.deallocate(resource.context, this, sizeof(local_group),
-                                        alignof(local_group));
+                    release_storage(resource, this, sizeof(local_group), alignof(local_group));
                     release_strong(control);
                 }
             }
@@ -328,7 +379,7 @@ namespace own
     {
         if (auto* block = std::exchange(block_, nullptr))
         {
-            block->dispose(block);
+            block->ops->dispose(block);
             detail::release_weak(block);
         }
     }
@@ -957,7 +1008,9 @@ namespace own
             template<class T>
             static void set_retirement(local_owner<T>& owner, retirement_hook hook) noexcept
             {
-                owner.group_->block->retirement = hook;
+                // Only extended blocks reach here; they always have a hook slot.
+                auto* block = owner.group_->block;
+                *block->ops->retirement(block) = hook;
             }
         };
     }
@@ -992,26 +1045,37 @@ namespace own
         return detail::owner_access::adopt_unique(new T(std::forward<Args>(args)...));
     }
 
+    namespace detail
+    {
+        // Allocates and constructs one block; a throwing payload constructor
+        // returns the storage to the allocator that provided it.
+        template<class T, class Block, class... Args>
+        shared_owner<T> create_shared(allocator_ref allocator, Args&&... args)
+        {
+            static_assert(std::is_object_v<T> && !std::is_array_v<T>);
+            static_assert(std::is_nothrow_destructible_v<T>, "owned destructors must be noexcept");
+            void* storage = allocate_bytes(allocator, sizeof(Block), alignof(Block));
+            Block* block;
+            try
+            {
+                block = ::new (storage) Block(std::forward<Args>(args)...);
+            }
+            catch (...)
+            {
+                allocator.deallocate(allocator.context, storage, sizeof(Block), alignof(Block));
+                throw;
+            }
+            owner_access::bind_from_this(block, block->pointer());
+            return owner_access::adopt(block, block->pointer());
+        }
+    }
+
     template<class T, class... Args>
     [[nodiscard]] shared_owner<T> allocate_shared_with(allocator_ref allocator,
                                                        retirement_hook hook, Args&&... args)
     {
-        static_assert(std::is_object_v<T> && !std::is_array_v<T>);
-        static_assert(std::is_nothrow_destructible_v<T>, "owned destructors must be noexcept");
-        using block_type = detail::in_place_control<T>;
-        void* storage = detail::allocate_bytes(allocator, sizeof(block_type), alignof(block_type));
-        block_type* block;
-        try
-        {
-            block = ::new (storage) block_type(allocator, hook, std::forward<Args>(args)...);
-        }
-        catch (...)
-        {
-            allocator.deallocate(allocator.context, storage, sizeof(block_type), alignof(block_type));
-            throw;
-        }
-        detail::owner_access::bind_from_this(block, block->pointer());
-        return detail::owner_access::adopt(block, block->pointer());
+        return detail::create_shared<T, detail::allocated_control<T>>(
+            allocator, allocator, hook, std::forward<Args>(args)...);
     }
 
     template<class T, class... Args>
@@ -1029,7 +1093,7 @@ namespace own
     template<class T, class... Args>
     [[nodiscard]] shared_owner<T> make_shared(Args&&... args)
     {
-        return own::allocate_shared<T>({}, std::forward<Args>(args)...);
+        return detail::create_shared<T, detail::in_place_control<T>>({}, std::forward<Args>(args)...);
     }
 
     template<class T, class... Args>
@@ -1059,7 +1123,9 @@ namespace own
     template<class T, class... Args>
     [[nodiscard]] local_owner<T> make_local(Args&&... args)
     {
-        return own::allocate_local<T>({}, std::forward<Args>(args)...);
+        // Compact block: no hook is ever installed. A failed group allocation
+        // releases the temporary owner and destroys the payload immediately.
+        return own::make_shared<T>(std::forward<Args>(args)...).localize();
     }
 
     template<class T> void swap(unique_owner<T>& a, unique_owner<T>& b) noexcept { a.swap(b); }

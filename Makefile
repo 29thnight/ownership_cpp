@@ -1,4 +1,4 @@
-.PHONY: test test-debug test-release asan ubsan tsan benchmark benchmark-unique benchmark-scaling example clean
+.PHONY: test test-debug test-release asan ubsan tsan benchmark benchmark-unique benchmark-scaling benchmark-layout example clean
 
 CXX ?= g++
 CXXFLAGS ?= -std=c++20 -O2 -Wall -Wextra -Wpedantic
@@ -29,6 +29,9 @@ benchmark-unique: test
 
 benchmark-scaling:
 	CXX="$(CXX)" ./scripts/benchmark_scaling.sh
+
+benchmark-layout:
+	CXX="$(CXX)" ./scripts/benchmark_layout.sh
 
 example:
 	mkdir -p build

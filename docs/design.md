@@ -127,10 +127,25 @@ Creating a second unique owner from `this` would violate exclusivity.
 
 ## Optional two-level strong ownership
 
-A coallocated control block holds atomic `strong` and `weak` counters, destruction
-function pointers, allocation callbacks, and an optional retirement hook. Every
-shared owner contributes one strong reference. A local group contributes one
-strong reference and holds a thread-confined, non-atomic alias count.
+A coallocated control block starts with a three-word header: atomic `strong` and
+`weak` counters and a pointer to a static per-type operations table (dispose,
+destroy, and where the retirement hook lives). `make_shared` and `make_local` use a
+compact block, header plus payload, with the default allocator and no hook: 32
+bytes for an 8-byte payload, against 80 bytes before this layout. Factories that
+take an allocator or a hook (`allocate_*`, `*_with`) use an extended block that
+also stores the allocator context, its deallocation callback and the hook (64
+bytes for an 8-byte payload). The allocate callback is not stored: nothing calls
+it after the block exists. Every shared owner contributes one strong reference. A
+local group contributes one strong reference and holds a thread-confined,
+non-atomic alias count; it stores only the deallocation context and callback,
+so a group is 40 bytes.
+
+A small header puts the payload on the same cache line as the counts for most
+allocation addresses, as in the standard library. Threads that read a payload
+while other threads copy or drop owners of the same object then pay for the line
+moving. A payload type declared `alignas(64)` (or the platform's destructive
+interference size) starts on its own line in either block. See
+[the layout measurements](benchmark_layout.md).
 
 A handle stores its adjusted `T*` separately from its ownership record. Base/const
 conversion preserves ownership of the original concrete allocation. Multiple

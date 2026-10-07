@@ -98,7 +98,7 @@ int main() {
     });
     test::run("weak locking saturation", [] {
         expect_abort([] {
-            own::detail::control_block block({}, {}, nullptr, nullptr);
+            own::detail::control_block block(nullptr);
             block.strong.store(own::detail::saturation_limit);
             (void)own::detail::try_add_strong(&block);
         });
@@ -111,7 +111,7 @@ int main() {
     });
     test::run("weak locking overflow", [] {
         expect_abort([] {
-            own::detail::control_block block({}, {}, nullptr, nullptr);
+            own::detail::control_block block(nullptr);
             block.strong.store(own::detail::count_limit);
             (void)own::detail::try_add_strong(&block);
         });

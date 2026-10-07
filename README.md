@@ -216,10 +216,13 @@ has actual thread confinement; `local_view` merely borrows a pointer and contain
 no thread ID, owner, or automatic validity check. Borrowed payload access still
 needs appropriate lifetime and synchronization.
 
-The shared/local allocation design is unchanged: `make_shared` coallocates object and
-control block once; `make_local` additionally allocates a local group, for two
-allocations. Every nonempty `localize()` allocates another group. There is no
-embedded-group/coallocation optimization in this revision.
+`make_shared` coallocates object and a compact control block once (a 24-byte
+header, as dense as the standard library's); `make_local` additionally allocates
+a 40-byte local group, for two allocations. Every nonempty `localize()` allocates
+another group. There is no embedded-group optimization in this revision. A
+payload read on one core while other cores copy its owners shares a cache line
+with the counts; declare such a hot type `alignas(64)` to give it its own line
+([measurements](docs/benchmark_layout.md)).
 
 ## Allocation and deferred retirement
 
