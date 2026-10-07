@@ -24,7 +24,16 @@ run_mode() {
         release) flags+=(-O3 -DNDEBUG) ;;
         asan) flags+=(-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined) ;;
         ubsan) flags+=(-O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=all) ;;
-        tsan) flags+=(-O1 -g -fno-omit-frame-pointer -fsanitize=thread) ;;
+        tsan)
+            flags+=(-O1 -g -fno-omit-frame-pointer -fsanitize=thread)
+            # Clang links its TSan runtime statically by default, and that
+            # archive defines operator new/delete, so the tests that replace
+            # the global allocation functions fail to link with duplicate
+            # symbols. The shared runtime lets the test's definitions win.
+            if "$cxx" --version 2>/dev/null | grep -qi clang; then
+                flags+=(-shared-libsan -Wl,-rpath,"$("$cxx" -print-runtime-dir)")
+            fi
+            ;;
         *) echo "Unknown test mode: $selected" >&2; return 2 ;;
     esac
     if [[ -n "${CXXFLAGS:-}" ]]; then
