@@ -51,6 +51,8 @@ run_mode() {
     "$output/owner_from_this_tests"
     "$cxx" "${flags[@]}" "$root/tests/default_allocation_failure_tests.cpp" -o "$output/default_allocation_failure_tests"
     "$output/default_allocation_failure_tests"
+    "$cxx" "${flags[@]}" "$root/tests/fresh_hint_tests.cpp" -o "$output/fresh_hint_tests"
+    "$output/fresh_hint_tests"
     "$cxx" "${flags[@]}" "$root/tests/local_exclusive_tests.cpp" -o "$output/local_exclusive_tests"
     "$output/local_exclusive_tests"
     "$cxx" "${flags[@]}" "$root/tests/null_comparison_tests.cpp" -o "$output/null_comparison_tests"

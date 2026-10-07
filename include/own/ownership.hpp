@@ -262,6 +262,22 @@ namespace own
             }
         }
 
+        // For a handle that is likely the only reference (see shared_owner's
+        // fresh hint). One strong reference and only the implicit weak means no
+        // other owner, observer or registration exists, and none can appear
+        // without one, so no other thread can touch the counts. The acquire
+        // load still orders earlier releases by other threads before disposal.
+        OWN_NOINLINE inline void release_strong_if_sole(control_block* block) noexcept
+        {
+            if (block->counts.load(std::memory_order_acquire) == unique_counts)
+            {
+                block->counts.store(weak_one, std::memory_order_relaxed);
+                last_strong_released(block);
+                return;
+            }
+            release_strong(block);
+        }
+
         inline bool try_add_strong(control_block* block) noexcept
         {
             auto value = block->counts.load(std::memory_order_relaxed);
@@ -773,29 +789,45 @@ namespace own
         using element_type = T;
         shared_owner() noexcept = default;
         shared_owner(std::nullptr_t) noexcept {}
+        // A copy never inherits the fresh hint: only the handle a factory
+        // returned (and whatever it is moved into) can be the sole reference.
         shared_owner(const shared_owner& other) noexcept
-            : block_(other.block_), pointer_(other.pointer_)
+            : bits_(other.bits_ & ~fresh_hint), pointer_(other.pointer_)
         {
-            if (block_) { detail::add_strong(block_); }
+            if (bits_) { detail::add_strong(block()); }
         }
         template<class U> requires std::is_convertible_v<U*, T*>
         shared_owner(const shared_owner<U>& other) noexcept
-            : block_(other.block_), pointer_(other.pointer_)
+            : bits_(other.bits_ & ~fresh_hint), pointer_(other.pointer_)
         {
-            if (block_) { detail::add_strong(block_); }
+            if (bits_) { detail::add_strong(block()); }
         }
         shared_owner(shared_owner&& other) noexcept
-            : block_(std::exchange(other.block_, nullptr)),
+            : bits_(std::exchange(other.bits_, 0)),
               pointer_(std::exchange(other.pointer_, nullptr))
         {
         }
         template<class U> requires std::is_convertible_v<U*, T*>
         shared_owner(shared_owner<U>&& other) noexcept
-            : block_(std::exchange(other.block_, nullptr)),
+            : bits_(std::exchange(other.bits_, 0)),
               pointer_(std::exchange(other.pointer_, nullptr))
         {
         }
-        ~shared_owner() { if (block_) { detail::release_strong(block_); } }
+        ~shared_owner()
+        {
+            // Unhinted bits are the block address itself, so the common path
+            // decrements without masking. The hinted path is out of line, so
+            // copy/drop loops keep only a bit test beside the decrement.
+            const auto bits = bits_;
+            if (bits & fresh_hint) [[unlikely]]
+            {
+                detail::release_strong_if_sole(reinterpret_cast<detail::control_block*>(bits - fresh_hint));
+            }
+            else if (bits) [[likely]]
+            {
+                detail::release_strong(reinterpret_cast<detail::control_block*>(bits));
+            }
+        }
         shared_owner& operator=(const shared_owner& other) noexcept
         {
             shared_owner(other).swap(*this);
@@ -821,7 +853,7 @@ namespace own
         void reset() noexcept { shared_owner().swap(*this); }
         void swap(shared_owner& other) noexcept
         {
-            std::swap(block_, other.block_);
+            std::swap(bits_, other.bits_);
             std::swap(pointer_, other.pointer_);
         }
 #if OWN_ENABLE_UNSAFE_GET_WARNING
@@ -838,16 +870,28 @@ namespace own
         T* operator->() const noexcept { return pointer_; }
         std::size_t use_count() const noexcept
         {
-            return block_ ? block_->use_count() : 0;
+            return bits_ ? block()->use_count() : 0;
         }
         [[nodiscard]] local_owner<T> localize(allocator_ref allocator = {}) const &;
         [[nodiscard]] local_owner<T> localize(allocator_ref allocator = {}) &&;
 
     private:
-        detail::control_block* block_ = nullptr;
+        // The control block address, with its low bit as a hint: set on the
+        // handle a factory returned and kept across moves, cleared on every
+        // copy. Only a hinted handle checks, on release, whether it holds the
+        // sole reference and can skip the atomic decrement; copies release
+        // with one fetch_sub as before. The hint selects a path only: the
+        // check itself decides, so a stale hint costs a load, never safety.
+        static constexpr std::uintptr_t fresh_hint = 1;
+        static_assert(alignof(detail::control_block) > fresh_hint);
+        std::uintptr_t bits_ = 0;
         T* pointer_ = nullptr;
-        shared_owner(detail::control_block* block, T* pointer) noexcept
-            : block_(block), pointer_(pointer)
+        detail::control_block* block() const noexcept
+        {
+            return reinterpret_cast<detail::control_block*>(bits_ & ~fresh_hint);
+        }
+        shared_owner(detail::control_block* block, T* pointer, bool fresh = false) noexcept
+            : bits_(reinterpret_cast<std::uintptr_t>(block) | (fresh ? fresh_hint : 0)), pointer_(pointer)
         {
         }
         template<class> friend class shared_owner;
@@ -971,20 +1015,20 @@ namespace own
     template<class T>
     local_owner<T> shared_owner<T>::localize(allocator_ref allocator) const &
     {
-        if (!block_) { return {}; }
+        if (!bits_) { return {}; }
         // Allocate first. Failure leaves this owner and its count unchanged.
-        auto* group = detail::new_group(block_, allocator);
-        detail::add_strong(block_);
+        auto* group = detail::new_group(block(), allocator);
+        detail::add_strong(block());
         return local_owner<T>(group, pointer_);
     }
 
     template<class T>
     local_owner<T> shared_owner<T>::localize(allocator_ref allocator) &&
     {
-        if (!block_) { return {}; }
-        auto* group = detail::new_group(block_, allocator);
+        if (!bits_) { return {}; }
+        auto* group = detail::new_group(block(), allocator);
         auto* pointer = std::exchange(pointer_, nullptr);
-        block_ = nullptr; // Transfer this global strong reference into the group.
+        bits_ = 0; // Transfer this global strong reference into the group.
         return local_owner<T>(group, pointer);
     }
 
@@ -1030,7 +1074,7 @@ namespace own
         }
         template<class U> requires std::is_convertible_v<U*, T*>
         weak_owner(const shared_owner<U>& other) noexcept
-            : block_(other.block_), pointer_(other.pointer_)
+            : block_(other.block()), pointer_(other.pointer_)
         {
             if (block_) { detail::add_weak(block_); }
         }
@@ -1183,7 +1227,7 @@ namespace own
             template<class T>
             static shared_owner<T> adopt(control_block* block, T* pointer) noexcept
             {
-                return shared_owner<T>(block, pointer);
+                return shared_owner<T>(block, pointer, true); // a factory's sole handle
             }
             template<class T>
             static void bind_from_this(control_block* block, T* object) noexcept
@@ -1198,12 +1242,11 @@ namespace own
                     }
                 }
             }
-            // Moves a new owner's strong reference into the group slot of its
-            // own block. Nothing can fail: the slot was allocated with the block.
-            template<class Block, class T>
-            static local_owner<T> into_embedded_group(shared_owner<T>&& owner) noexcept
+            // Gives a new block's strong reference to the group slot inside it.
+            // Nothing can fail: the slot was allocated with the block.
+            template<class T, class Block>
+            static local_owner<T> into_embedded_group(Block* block) noexcept
             {
-                auto* block = static_cast<Block*>(owner.block_);
                 allocator_ref no_storage{nullptr, nullptr, embedded_group_release};
                 auto* group = ::new (static_cast<void*>(block->group.storage)) local_group(block, no_storage);
                 // Fresh from the factory and unpublished: exclusive unless the
@@ -1212,9 +1255,7 @@ namespace own
                 {
                     group->references |= local_group::exclusive_bit;
                 }
-                auto* pointer = std::exchange(owner.pointer_, nullptr);
-                owner.block_ = nullptr;
-                return local_owner<T>(group, pointer);
+                return local_owner<T>(group, block->pointer());
             }
         };
     }
@@ -1254,7 +1295,7 @@ namespace own
         // Allocates and constructs one block; a throwing payload constructor
         // returns the storage to the allocator that provided it.
         template<class T, class Block, class... Args>
-        shared_owner<T> create_shared(allocator_ref allocator, Args&&... args)
+        Block* create_block(allocator_ref allocator, Args&&... args)
         {
             static_assert(std::is_object_v<T> && !std::is_array_v<T>);
             static_assert(std::is_nothrow_destructible_v<T>, "owned destructors must be noexcept");
@@ -1270,6 +1311,13 @@ namespace own
                 throw;
             }
             owner_access::bind_from_this(block, block->pointer());
+            return block;
+        }
+
+        template<class T, class Block, class... Args>
+        shared_owner<T> create_shared(allocator_ref allocator, Args&&... args)
+        {
+            Block* block = create_block<T, Block>(allocator, std::forward<Args>(args)...);
             return owner_access::adopt(block, block->pointer());
         }
     }
@@ -1307,8 +1355,8 @@ namespace own
         // One allocation holds the block, payload and first group, so the hook
         // can be installed at construction: a factory that fails has no object.
         using block_type = detail::allocated_control<T, true>;
-        return detail::owner_access::into_embedded_group<block_type>(
-            detail::create_shared<T, block_type>(allocator, allocator, hook, std::forward<Args>(args)...));
+        return detail::owner_access::into_embedded_group<T>(
+            detail::create_block<T, block_type>(allocator, allocator, hook, std::forward<Args>(args)...));
     }
 
     template<class T, class... Args>
@@ -1328,8 +1376,8 @@ namespace own
     {
         // Compact block with the first group inside it: one allocation.
         using block_type = detail::in_place_control<T, true>;
-        return detail::owner_access::into_embedded_group<block_type>(
-            detail::create_shared<T, block_type>({}, std::forward<Args>(args)...));
+        return detail::owner_access::into_embedded_group<T>(
+            detail::create_block<T, block_type>({}, std::forward<Args>(args)...));
     }
 
     template<class T> void swap(unique_owner<T>& a, unique_owner<T>& b) noexcept { a.swap(b); }
