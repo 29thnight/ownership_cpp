@@ -1,0 +1,166 @@
+
+=== debug (g++) ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+28/28 tests passed
+PASS foreign get
+PASS foreign bool
+PASS foreign dereference
+PASS foreign arrow
+PASS foreign shared count
+PASS foreign local count
+PASS foreign copy
+PASS foreign move
+PASS foreign reset
+PASS foreign share
+PASS foreign weak construction
+PASS foreign assignment source
+PASS foreign assignment target
+PASS foreign swap
+PASS foreign destruction
+PASS atomic reference overflow
+PASS atomic zero cannot resurrect
+PASS weak locking overflow
+PASS local reference overflow
+PASS invalid allocator callbacks
+20/20 tests passed
+PASS compile rejection: array_fixed_factory
+PASS compile rejection: array_local_factory
+PASS compile rejection: array_local_owner
+PASS compile rejection: array_shared_factory
+PASS compile rejection: array_shared_owner
+PASS compile rejection: array_weak_owner
+PASS compile rejection: const_removal
+PASS compile rejection: implicit_promotion
+PASS compile rejection: raw_local_owner
+PASS compile rejection: raw_shared_owner
+PASS compile rejection: throwing_destructor
+PASS debug (including isolated header and multi-translation-unit link)
+
+=== release (g++) ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+28/28 tests passed
+PASS release (including isolated header and multi-translation-unit link)
+
+=== asan (g++) ===
+==1985==LeakSanitizer has encountered a fatal error.
+==1985==HINT: For debugging, try setting environment variable LSAN_OPTIONS=verbosity=1:log_threads=1
+==1985==HINT: LeakSanitizer does not work under ptrace (strace, gdb, etc)
+FAIL mode: asan (see compiler/runtime output above)
+
+=== ubsan (g++) ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+28/28 tests passed
+PASS ubsan (including isolated header and multi-translation-unit link)
+
+=== tsan (g++) ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+28/28 tests passed
+PASS tsan (including isolated header and multi-translation-unit link)

@@ -1,0 +1,310 @@
+=== release repetition 1 ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
+=== release repetition 2 ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
+=== release repetition 3 ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
+=== release repetition 4 ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
+=== release repetition 5 ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
+=== tsan repetition 1 ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
+=== tsan repetition 2 ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
+=== tsan repetition 3 ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
+=== tsan repetition 4 ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
+=== tsan repetition 5 ===
+PASS empty owners
+PASS shared lifetime
+PASS local lifetime and promotion
+PASS independent local groups
+PASS rvalue transitions
+PASS weak semantics
+PASS shared conversions and pointer adjustment
+PASS local conversions and pointer adjustment
+PASS immutable and move-only payloads
+PASS class-specific operator new bypass
+PASS virtual-base weak conversions
+PASS virtual-base weak conversion race
+PASS custom allocator lifetime
+PASS over-aligned storage
+PASS throwing constructors
+PASS initial allocation failures
+PASS local group allocation failures
+PASS failed factory does not retire
+PASS localization exception safety
+PASS delayed retirement
+PASS retirement without external weak
+PASS retirement move assignment
+PASS retirement thread migration
+PASS inline retirement and null hook
+PASS embedded weak destruction
+PASS global concurrency and local fanout
+PASS weak race never resurrects
+PASS weak copy/drop concurrency
+PASS deferred final-release race
+29/29 tests passed
