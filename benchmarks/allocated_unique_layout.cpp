@@ -132,7 +132,7 @@ std::unique_ptr<T, erased_delete> make_erased(own::allocator_ref allocator, Args
 }
 
 struct own40 {
-    using owner = own::allocated_unique_owner<resource>;
+    using owner = own::unique_owner<resource, own::allocator_ref>;
     static owner make(std::uint64_t id) { return own::allocate_unique<resource>({}, id); }
 };
 struct proto16 {

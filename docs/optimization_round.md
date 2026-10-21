@@ -19,10 +19,10 @@ optimized one at a time, and everything was re-run on the final head.
    CSV verified with `benchmarks/verify_results.py` (checksum 20708780059296 in all
    four runs); others as in their reports
 
-Data: before [primary](../benchmarks/results/remeasure_main_primary/summary.csv) /
-[repeat](../benchmarks/results/remeasure_main_repeat/summary.csv), after
-[primary](../benchmarks/results/final_main_primary/summary.csv) /
-[repeat](../benchmarks/results/final_main_repeat/summary.csv); `remeasure_*` and
+Data: before [primary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/remeasure_main_primary/summary.csv) /
+[repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/remeasure_main_repeat/summary.csv), after
+[primary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/final_main_primary/summary.csv) /
+[repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/final_main_repeat/summary.csv); `remeasure_*` and
 `final_*` directories for the other harnesses; `optimized_*` is an intermediate
 head (`39bf43f`).
 
@@ -86,8 +86,8 @@ The trade-off above came from checking the counts on every release. A follow-up
 (`6a6455f`) checks only on the handle a factory returned: a hint in the low bit
 of its block address, carried by moves and cleared by copies, so copies keep a
 single `fetch_sub` release. Main harness, 101 samples x 2, against the head
-above ([primary](../benchmarks/results/hint_main_primary/summary.csv),
-[repeat](../benchmarks/results/hint_main_repeat/summary.csv)):
+above ([primary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/hint_main_primary/summary.csv),
+[repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/hint_main_repeat/summary.csv)):
 
 | Case | Before | After | own/std after |
 |---|---:|---:|---:|

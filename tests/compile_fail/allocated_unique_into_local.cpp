@@ -1,3 +1,4 @@
+// expect: no matching (function for call to|constructor for initialization of) '(own::)?local_owner<int>
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

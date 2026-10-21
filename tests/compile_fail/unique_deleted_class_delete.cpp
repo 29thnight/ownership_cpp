@@ -1,3 +1,5 @@
+// expect: deleted function
+// expect: operator delete
 #include <own/ownership.hpp>
 #include <utility>
 

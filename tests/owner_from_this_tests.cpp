@@ -22,11 +22,11 @@ struct self_owned : own::enable_owner_from_this<self_owned> {
     int value = 73;
     explicit self_owned(observations& state) : observed(&state) {
         state.constructor_unbound = !shared_from_this() && weak_from_this().expired() &&
-                                   !local_from_this() && !borrow_from_this();
+                                   !borrow_from_this();
     }
     ~self_owned() {
         observed->destructor_unbound = !shared_from_this() && weak_from_this().expired() &&
-                                      !local_from_this() && !borrow_from_this();
+                                      !borrow_from_this();
         ++observed->destroyed;
     }
 };
@@ -82,8 +82,22 @@ static_assert(std::is_same_v<decltype(std::declval<self_owned&>().shared_from_th
 static_assert(std::is_same_v<decltype(std::declval<const self_owned&>().shared_from_this()), own::shared_owner<const self_owned>>);
 static_assert(std::is_same_v<decltype(std::declval<self_owned&>().weak_from_this()), own::weak_owner<self_owned>>);
 static_assert(std::is_same_v<decltype(std::declval<const self_owned&>().weak_from_this()), own::weak_owner<const self_owned>>);
+// Deprecated synonym: still the same view type (and own::local_view still names own::borrowed).
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 static_assert(std::is_same_v<decltype(std::declval<self_owned&>().local_from_this()), own::local_view<self_owned>>);
 static_assert(std::is_same_v<decltype(std::declval<const self_owned&>().local_from_this()), own::local_view<const self_owned>>);
+static_assert(std::is_same_v<own::local_view<self_owned>, own::borrowed<self_owned>>);
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(pop)
+#else
+#pragma GCC diagnostic pop
+#endif
 static_assert(std::is_same_v<decltype(std::declval<self_owned&>().borrow_from_this()), own::local_view<self_owned>>);
 static_assert(std::is_same_v<decltype(std::declval<const self_owned&>().borrow_from_this()), own::local_view<const self_owned>>);
 static_assert(noexcept(std::declval<self_owned&>().shared_from_this()));
@@ -99,10 +113,10 @@ void unbound_stack_and_construction() {
         self_owned unmanaged(observed);
         CHECK(observed.constructor_unbound);
         CHECK(!unmanaged.shared_from_this() && unmanaged.weak_from_this().expired());
-        CHECK(!unmanaged.local_from_this() && !unmanaged.borrow_from_this());
+        CHECK(!unmanaged.borrow_from_this());
         const auto& constant = unmanaged;
         CHECK(!constant.shared_from_this() && constant.weak_from_this().expired());
-        CHECK(!constant.local_from_this() && !constant.borrow_from_this());
+        CHECK(!constant.borrow_from_this());
     }
     CHECK(observed.destroyed == 1 && observed.destructor_unbound);
 }
@@ -119,7 +133,7 @@ void same_control_and_independent_ownership() {
         CHECK(std::addressof(*shared) == std::addressof(*owner));
         CHECK(shared.use_count() == 2 && owner.use_count() == 2 && weak.use_count() == 2);
         auto borrowed = owner->borrow_from_this();
-        auto local = owner->local_from_this();
+        auto local = owner->borrow_from_this();
         CHECK(std::addressof(*borrowed) == std::addressof(*owner));
         CHECK(local->value == 73 && owner.use_count() == 2 && allocation.allocated == 1);
         owner.reset();
@@ -141,7 +155,7 @@ void optional_local_owner_registration() {
         auto alias = local;
         escaped = local->shared_from_this();
         auto weak = alias->weak_from_this();
-        auto borrowed = alias->local_from_this();
+        auto borrowed = alias->borrow_from_this();
         CHECK(local.local_use_count() == 2 && local.use_count() == 2 && weak.use_count() == 2);
         // The first group lives inside the block: one allocation in total.
         CHECK(borrowed->value == 73 && allocation.allocated == 1);
@@ -158,7 +172,7 @@ void const_factory_and_access() {
         auto owner = own::make_shared<const self_owned>(observed);
         auto shared = owner->shared_from_this();
         auto weak = owner->weak_from_this();
-        auto borrowed = owner->local_from_this();
+        auto borrowed = owner->borrow_from_this();
         CHECK(std::addressof(*shared) == std::addressof(*owner));
         CHECK(shared.use_count() == 2 && weak.use_count() == 2 && borrowed->value == 73);
         CHECK(owner->borrow_from_this()->value == 73);
@@ -176,7 +190,7 @@ void copying_and_moving_discard_registration() {
     auto original = own::make_shared<copying_self>(19);
     copying_self copied(*original);
     copying_self moved(std::move(*original));
-    CHECK(!copied.shared_from_this() && copied.weak_from_this().expired() && !copied.local_from_this());
+    CHECK(!copied.shared_from_this() && copied.weak_from_this().expired() && !copied.borrow_from_this());
     CHECK(!moved.shared_from_this() && moved.weak_from_this().expired() && !moved.borrow_from_this());
     CHECK(original.use_count() == 1 && original->shared_from_this().use_count() == 2);
     auto copy_owner = own::make_shared<copying_self>(*original);
@@ -213,7 +227,7 @@ void inherited_mixins_adjust_pointer() {
     auto* base = static_cast<inherited_base*>(std::addressof(*owner));
     CHECK(static_cast<void*>(base) != static_cast<void*>(std::addressof(*owner)));
     auto shared = owner->shared_from_this();
-    auto borrowed = owner->local_from_this();
+    auto borrowed = owner->borrow_from_this();
     auto weak = owner->weak_from_this();
     CHECK(std::addressof(*shared) == base && std::addressof(*borrowed) == base);
     CHECK(owner.use_count() == 2 && weak.use_count() == 2);
@@ -226,7 +240,7 @@ void inherited_mixins_adjust_pointer() {
     auto diamond = own::make_shared<virtual_diamond>();
     auto diamond_shared = diamond->shared_from_this();
     CHECK(std::addressof(*diamond_shared) == static_cast<inherited_base*>(std::addressof(*diamond)));
-    CHECK(diamond.use_count() == 2 && diamond->local_from_this()->base_value == 91);
+    CHECK(diamond.use_count() == 2 && diamond->borrow_from_this()->base_value == 91);
 }
 
 void deferred_expiry_never_resurrects() {
@@ -249,7 +263,7 @@ void deferred_expiry_never_resurrects() {
         // The queued retirement task explicitly keeps this concrete payload
         // alive until run(). These accesses are not through a dangling view.
         CHECK(!payload->shared_from_this() && payload->weak_from_this().expired());
-        CHECK(!payload->local_from_this() && !payload->borrow_from_this());
+        CHECK(!payload->borrow_from_this());
         queue.pending->run();
         CHECK(observed.destroyed == 1 && observed.destructor_unbound && !weak.lock());
         queue.pending.reset();
@@ -276,7 +290,7 @@ void failed_factory_cleans_registration() {
 
     struct throwing_self : own::enable_owner_from_this<throwing_self> {
         explicit throwing_self(bool& unbound) {
-            unbound = !shared_from_this() && weak_from_this().expired() && !local_from_this();
+            unbound = !shared_from_this() && weak_from_this().expired() && !borrow_from_this();
             throw std::runtime_error("expected constructor failure");
         }
     };
@@ -302,7 +316,7 @@ void concurrent_from_this_uses_original_block() {
             for (int iteration = 0; iteration < 10000; ++iteration) {
                 auto owner = source->shared_from_this();
                 auto observer = source->weak_from_this();
-                auto local = source->local_from_this();
+                auto local = source->borrow_from_this();
                 auto locked = observer.lock();
                 if (owner->value == 73 && local->value == 73 &&
                     std::addressof(*locked) == std::addressof(*source)) {

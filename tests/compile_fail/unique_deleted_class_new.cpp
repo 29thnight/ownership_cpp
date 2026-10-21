@@ -1,3 +1,4 @@
+// expect: deleted function.*operator new
 #include <own/ownership.hpp>
 #include <utility>
 

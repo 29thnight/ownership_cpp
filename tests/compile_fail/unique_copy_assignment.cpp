@@ -1,3 +1,4 @@
+// expect: deleted.*operator ?'?=
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

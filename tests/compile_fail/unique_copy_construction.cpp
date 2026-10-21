@@ -1,3 +1,4 @@
+// expect: deleted (function '(own::)?unique_owner<T(, Alloc)?>::unique_owner\(const|constructor of '(own::)?unique_owner<int(, ?(\(default\) )?(\[\.\.\.\]|(own::)?new_delete))?>')
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

@@ -19,6 +19,30 @@ bool fail_now() noexcept {
 }
 } // namespace
 
+// Aligned storage for the replaced aligned operator new. MSVC has no
+// std::aligned_alloc, and its aligned blocks must be released with _aligned_free.
+// Out of line for the same reason as the replacement functions: GCC's
+// mismatched-new-delete analysis must not see an inlined free on its own.
+#if defined(__GNUC__) || defined(__clang__)
+#define OWN_TEST_ALIGNED_NOINLINE __attribute__((noinline))
+#else
+#define OWN_TEST_ALIGNED_NOINLINE
+#endif
+#if defined(_WIN32)
+#include <malloc.h>
+OWN_TEST_ALIGNED_NOINLINE static void* test_aligned_allocate(std::size_t alignment, std::size_t size) {
+    return _aligned_malloc(size == 0 ? 1 : size, alignment);
+}
+OWN_TEST_ALIGNED_NOINLINE static void test_aligned_free(void* pointer) { _aligned_free(pointer); }
+#else
+OWN_TEST_ALIGNED_NOINLINE static void* test_aligned_allocate(std::size_t alignment, std::size_t size) {
+    // aligned_alloc requires size to be an exact multiple of alignment.
+    const auto rounded_size = ((size + alignment - 1) / alignment) * alignment;
+    return std::aligned_alloc(alignment, rounded_size == 0 ? alignment : rounded_size);
+}
+OWN_TEST_ALIGNED_NOINLINE static void test_aligned_free(void* pointer) { std::free(pointer); }
+#endif
+
 // Dedicated executable: replace global new only here, never in the ordinary
 // unit suite. This verifies the actual make_* and default localize paths.
 void* operator new(std::size_t size) {
@@ -40,15 +64,18 @@ void operator delete(void* pointer, std::size_t) noexcept { ::operator delete(po
 void* operator new(std::size_t size, std::align_val_t requested_alignment) {
     if (fail_now()) throw std::bad_alloc();
     const auto alignment = static_cast<std::size_t>(requested_alignment);
-    // aligned_alloc requires size to be an exact multiple of alignment.
-    const auto rounded_size = ((size + alignment - 1) / alignment) * alignment;
-    if (void* result = std::aligned_alloc(alignment, rounded_size == 0 ? alignment : rounded_size)) {
+    if (void* result = test_aligned_allocate(alignment, size)) {
         ++live_allocations;
         return result;
     }
     throw std::bad_alloc();
 }
-void operator delete(void* pointer, std::align_val_t) noexcept { ::operator delete(pointer); }
+OWN_TEST_ALIGNED_NOINLINE void operator delete(void* pointer, std::align_val_t) noexcept {
+    if (pointer) {
+        --live_allocations;
+        test_aligned_free(pointer);
+    }
+}
 void operator delete(void* pointer, std::size_t, std::align_val_t alignment) noexcept {
     ::operator delete(pointer, alignment);
 }
@@ -110,6 +137,9 @@ void localization_failures() {
 void localize_reuses_thread_cached_group() {
     int destroyed = 0;
     auto owner = own::make_shared<tracked>(destroyed);
+    // Read before the worker exists. Reading it while the worker runs raced
+    // with the worker's own allocations and failed intermittently under load.
+    const int before = live_allocations.load();
     std::thread worker([&] {
         // Constructed before the cache registers its thread-exit cleanup, so it
         // is destroyed after that cleanup: its group must be freed directly
@@ -130,10 +160,10 @@ void localize_reuses_thread_cached_group() {
         fail_after = -1;
         CHECK(!allocated && live_allocations == baseline);
     });
-    const int before = live_allocations.load();
     worker.join();
-    // Exit freed the cached slot and the late owner's group: nothing leaked.
-    CHECK(live_allocations < before && owner.use_count() == 1 && destroyed == 0);
+    // Exit freed the cached slot, the late owner's group and the thread's own
+    // state: everything the worker allocated is gone, nothing leaked.
+    CHECK(live_allocations == before && owner.use_count() == 1 && destroyed == 0);
     owner.reset();
     CHECK(destroyed == 1);
 }

@@ -16,7 +16,7 @@
 
 namespace {
 #if defined(__unix__) || defined(__APPLE__)
-void expect_abort(const std::function<void()>& body) {
+[[maybe_unused]] void expect_abort(const std::function<void()>& body) {
     std::cout.flush();
     std::cerr.flush();
     const pid_t child = fork();
@@ -24,7 +24,7 @@ void expect_abort(const std::function<void()>& body) {
     if (child == 0) {
         rlimit no_core{0, 0};
         setrlimit(RLIMIT_CORE, &no_core);
-        (void)std::freopen("/dev/null", "w", stderr);
+        if (!std::freopen("/dev/null", "w", stderr)) { /* keep the child's stderr */ }
         body();
         _exit(0);
     }

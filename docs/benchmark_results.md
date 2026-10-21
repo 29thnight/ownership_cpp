@@ -9,7 +9,7 @@ for every use. The appropriate standard-library baseline is a retained
 
 On this one Linux cloud VM:
 
-- Borrowed by-value parameters measured **1.357 ns/call for both** `local_view` and the standard raw-borrow baseline. Their non-inlined parameter helpers contain [matching instructions](../benchmarks/results/20261007_view_repeat/borrow_parameter_codegen.txt), with no allocation or reference-count operation
+- Borrowed by-value parameters measured **1.357 ns/call for both** `local_view` and the standard raw-borrow baseline. Their non-inlined parameter helpers contain [matching instructions](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_repeat/borrow_parameter_codegen.txt), with no allocation or reference-count operation
 - A contiguous 4,096-draw borrow loop measured **2.882 µs own vs 2.927 µs std**; the independent process repeat was **2.918 vs 2.915 µs**. There is no useful measured draw-loop advantage here
 - One shared pin at scope entry, original-owner reset, and 1,024 borrowed reads measured **565.887 ns own vs 405.753 ns std**; repeat **566.814 vs 405.144 ns**. Own was slower in this benchmark. The pin is ordinary shared ownership; the loop itself makes no ownership copies
 - Shared queue handoff followed by 1,024 worker-local borrowed reads measured **1.351 µs own vs 1.363 µs std/job**; repeat **1.388 vs 1.320 µs**. Queue synchronization and scheduling are included, so this is not isolated borrow or reference-count latency
@@ -61,8 +61,8 @@ fields; this metadata-only script edit does not change the measured harness.
 
 Current full runs, each with **56 cases × 101 measured samples**, five warmups:
 
-- Primary: [summary](../benchmarks/results/20261007_view_primary/summary.csv), [all samples](../benchmarks/results/20261007_view_primary/raw.csv), [metadata](../benchmarks/results/20261007_view_primary/metadata.txt), [settings/checksum](../benchmarks/results/20261007_view_primary/run.txt), [file hashes](../benchmarks/results/20261007_view_primary/SHA256SUMS)
-- Independent process repeat: [summary](../benchmarks/results/20261007_view_repeat/summary.csv), [all samples](../benchmarks/results/20261007_view_repeat/raw.csv), [metadata](../benchmarks/results/20261007_view_repeat/metadata.txt), [settings/checksum](../benchmarks/results/20261007_view_repeat/run.txt), [file hashes](../benchmarks/results/20261007_view_repeat/SHA256SUMS)
+- Primary: [summary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_primary/summary.csv), [all samples](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_primary/raw.csv), [metadata](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_primary/metadata.txt), [settings/checksum](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_primary/run.txt), [file hashes](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_primary/SHA256SUMS)
+- Independent process repeat: [summary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_repeat/summary.csv), [all samples](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_repeat/raw.csv), [metadata](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_repeat/metadata.txt), [settings/checksum](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_repeat/run.txt), [file hashes](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_repeat/SHA256SUMS)
 
 Both full runs produced checksum `20708780059296`. Source hashes identify the measured header and harness:
 
@@ -137,8 +137,8 @@ still present in the 56-case CSVs.
 ## Actual prior-source rerun and unchanged-harness control
 
 The [published report at ae6caf8](benchmark_results_ae6caf8.md) is preserved
-**byte-for-byte**, as are its [original primary](../benchmarks/results/20261007_primary/)
-and [original repeat](../benchmarks/results/20261007_repeat/) artifacts. Its framing
+**byte-for-byte**, as are its [original primary](https://github.com/29thnight/ownership_cpp/tree/bench-data/benchmarks/results/20261007_primary/)
+and [original repeat](https://github.com/29thnight/ownership_cpp/tree/bench-data/benchmarks/results/20261007_repeat/) artifacts. Its framing
 and results are historical, not newly measured view-first results.
 
 A separate Git checkout was detached at the actual published commit
@@ -146,15 +146,15 @@ A separate Git checkout was detached at the actual published commit
 compiled and run twice with the same GCC 14.2.0 compiler and release flags used
 above. This is not an emulation of the old API on the current implementation:
 
-- Old-source rerun primary: [summary](../benchmarks/results/20261007_ae6caf8_rerun_primary/summary.csv), [raw](../benchmarks/results/20261007_ae6caf8_rerun_primary/raw.csv), [metadata](../benchmarks/results/20261007_ae6caf8_rerun_primary/metadata.txt)
-- Old-source rerun repeat: [summary](../benchmarks/results/20261007_ae6caf8_rerun_repeat/summary.csv), [raw](../benchmarks/results/20261007_ae6caf8_rerun_repeat/raw.csv), [metadata](../benchmarks/results/20261007_ae6caf8_rerun_repeat/metadata.txt)
+- Old-source rerun primary: [summary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_ae6caf8_rerun_primary/summary.csv), [raw](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_ae6caf8_rerun_primary/raw.csv), [metadata](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_ae6caf8_rerun_primary/metadata.txt)
+- Old-source rerun repeat: [summary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_ae6caf8_rerun_repeat/summary.csv), [raw](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_ae6caf8_rerun_repeat/raw.csv), [metadata](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_ae6caf8_rerun_repeat/metadata.txt)
 
 The byte-exact [old benchmark source](../benchmarks/baseline_ae6caf8/ownership_bench.cpp)
 was then compiled against the current frozen header, without accessor edits or any
 other source compatibility transformation:
 
-- Current-header control primary: [summary](../benchmarks/results/20261007_current_header_control_primary/summary.csv), [raw](../benchmarks/results/20261007_current_header_control_primary/raw.csv), [metadata](../benchmarks/results/20261007_current_header_control_primary/metadata.txt)
-- Current-header control repeat: [summary](../benchmarks/results/20261007_current_header_control_repeat/summary.csv), [raw](../benchmarks/results/20261007_current_header_control_repeat/raw.csv), [metadata](../benchmarks/results/20261007_current_header_control_repeat/metadata.txt)
+- Current-header control primary: [summary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_current_header_control_primary/summary.csv), [raw](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_current_header_control_primary/raw.csv), [metadata](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_current_header_control_primary/metadata.txt)
+- Current-header control repeat: [summary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_current_header_control_repeat/summary.csv), [raw](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_current_header_control_repeat/raw.csv), [metadata](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_current_header_control_repeat/metadata.txt)
 
 All four controls retain the exact original **37 cases**, 101 samples and five
 warmups, with checksum `20688493065280`. Old header SHA-256:
@@ -163,7 +163,7 @@ Unchanged harness SHA-256:
 `cafb96ef1d60afc4fe251057a3fc053772d31fbd3105e5f1a453e5bf0884feae`.
 
 Selected **median ns/unit** below use the fresh reruns, not the original published
-numbers. [All 37 temporal comparisons](../benchmarks/results/comparison_ae6caf8_to_view.csv)
+numbers. [All 37 temporal comparisons](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/comparison_ae6caf8_to_view.csv)
 are retained, including the published-primary column.
 
 | Case | Implementation | Unit | Old primary | Old repeat | Current primary | Current repeat |
@@ -198,7 +198,7 @@ scripts/benchmark.sh --samples 101 --warmups 5 --iterations 100000
 
 ## Allocation and space overhead
 
-[Allocation counts](../benchmarks/results/20261007_view_primary/allocations.csv) use
+[Allocation counts](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_primary/allocations.csv) use
 equivalent custom allocation callbacks, outside timing. The standard allocator is
 stateless, avoiding an instrumentation pointer in its control block. Counts and
 bytes concern ownership storage; common vector/deque backing storage is excluded.
@@ -219,7 +219,7 @@ the retained owner's strong count. This ordinary `owner.borrow()` path has no
 control-block access or guard. The owner allocation exists before borrowing and
 is not attributable to a view.
 
-[Observed ABI sizes](../benchmarks/results/20261007_view_primary/sizes.csv): payload
+[Observed ABI sizes](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_primary/sizes.csv): payload
 88 bytes; `local_view` and raw pointer **8 bytes**; own shared/local/weak handles and
 standard shared/weak handles **16 bytes**. A compile-time assertion checks that the
 view is pointer-sized and trivially copyable. Existing own shared control overhead
@@ -239,7 +239,7 @@ implementation-specific, not promises for other platforms.
 
 ## Lifetime and sanitizer validation
 
-The [untimed validation trace](../benchmarks/results/20261007_view_primary/lifetime_validation.txt)
+The [untimed validation trace](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_primary/lifetime_validation.txt)
 retains the old hot-reload/frame-lease/weak-expiration/deferred-destruction sequence
 and adds matched own/std scope-pin checks:
 
@@ -257,15 +257,15 @@ untimed; normal timed std factories use `std::make_shared`.
 
 The final header and 56-case harness passed **ASan+UBSan**, with debug local-owner
 thread checks enabled, three samples, one warmup, 1,000 iterations:
-[status](../benchmarks/results/20261007_view_sanitizer/status.txt),
-[complete log](../benchmarks/results/20261007_view_sanitizer/driver.log),
-[metadata/source hashes](../benchmarks/results/20261007_view_sanitizer/metadata.txt).
+[status](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_sanitizer/status.txt),
+[complete log](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_sanitizer/driver.log),
+[metadata/source hashes](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_sanitizer/metadata.txt).
 The benchmark also compiles with `-Werror` and default raw-access warnings enabled.
 
 Leak detection was rechecked with `ASAN_OPTIONS=detect_leaks=1`. That run failed at
 process exit because LeakSanitizer reports that it does not work under ptrace:
 [matching environment diagnostic from the test run](../tests/results/asan-default.log),
-[exit status](../benchmarks/results/20261007_view_sanitizer_leaks_enabled/status.txt).
+[exit status](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_view_sanitizer_leaks_enabled/status.txt).
 The leak-enabled benchmark driver log is not part of the published artifacts;
 its exit status and measured output remain available. The passing ASan+UBSan run
 uses `detect_leaks=0`. **LeakSanitizer leak detection

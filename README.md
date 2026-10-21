@@ -9,8 +9,8 @@ ordinary function calls and loops:
 
 - `unique_owner<T>` is the default for exclusive ownership: move it, do not copy it
 - `shared_owner<T>` supports multiple independent owners; use it when sharing is needed
-- `local_view<T>` borrows access; pointer-sized, trivially copyable, with no allocation,
-  reference-count update, or owned guard
+- `borrowed<T>` borrows access; pointer-sized, trivially copyable, with no allocation,
+  reference-count update, or owned guard (formerly `local_view<T>`, still an alias)
 - `weak_owner<T>` observes a potentially expired lifetime; `lock()` before use
 
 The production header implements its own reference counting. It uses low-level
@@ -18,13 +18,16 @@ standard facilities, not standard smart pointers, containers, or a third-party
 runtime. The optional `local_owner<T>` serves a different need: independent owning
 copies confined to one thread. It is not a borrowed view.
 
+Integrating into an engine with several DLLs or a crash reporter? Read
+[Engine integration](#engine-integration) first.
+
 ## Quick start
 
 ```cpp
 #include <own/ownership.hpp>
 
 struct asset { int version; };
-void draw(own::local_view<const asset> view)
+void draw(own::borrowed<const asset> view)
 {
     // Read view->version. The caller keeps an owner alive for this call.
 }
@@ -77,10 +80,26 @@ still retain references or explicitly call `operator->()`, so this is not a borr
 checker or a security boundary. Never use a dangling view, even to adjust a virtual
 base pointer during conversion.
 
+Under Clang the owners and views carry lifetime annotations, so the compiler's
+own analysis reports common dangling views at no runtime cost:
+
+```cpp
+own::borrowed<asset> leak()
+{
+    auto owner = own::make_shared<asset>(4);
+    return owner.borrow();   // warning: address of stack memory associated with 'owner' returned
+}
+```
+
+The analysis is local: it does not follow a view stored in an object or captured
+by deferred work. Build with `-Werror=return-stack-address -Werror=dangling` to
+make it an error. Other compilers ignore the annotations
+([details](docs/design.md#static-lifetime-analysis)).
+
 ## Exclusive ownership
 
 ```cpp
-auto object = own::make_unique<asset>(3);
+auto object = own::make_unique<asset>(3);           // or: own::unique_owner<asset> object(std::in_place, 3);
 auto next_owner = std::move(object);  // object becomes empty; payload stays put
 auto view = next_owner.borrow();
 next_owner.reset();                  // destroys payload; do not use view afterward
@@ -88,10 +107,15 @@ next_owner.reset();                  // destroys payload; do not use view afterw
 
 The default `unique_owner<T>` contains only `T*`: **8 bytes on the tested 64-bit
 ABI**, matching default `std::unique_ptr<T>`. It has no reference count, shared
-control block, allocator context or runtime deleter. `make_unique<T>(args...)`
-uses ordinary `new T(args...)`; destruction uses typed `delete`. Class-specific
-allocation/deallocation functions and constructor-failure cleanup follow C++
-new/delete rules together, rather than mixing allocation schemes.
+control block, allocator context or runtime deleter. `make_unique<T>(args...)` and
+the `std::in_place` constructor use ordinary `new T(args...)`; destruction uses
+typed `delete`. Class-specific allocation/deallocation functions and
+constructor-failure cleanup follow C++ new/delete rules together, rather than
+mixing allocation schemes.
+
+The constructor needs `std::in_place` (or an allocator, below). A bare argument
+list such as `unique_owner<int> owner(value)` stays a compile error, because it
+would read as adopting `value` rather than copying it into a new object.
 
 Moves, `reset`, `swap`, `bool`, `*`, `->`, `borrow` and the warned `unsafe_get` are
 supported. Safe const qualification is allowed. An owning derived-to-base move
@@ -101,31 +125,59 @@ owner and convert its borrowed view to access that base instead. The payload typ
 must be complete wherever default destruction/reset is instantiated, as with
 ordinary standard unique ownership.
 
-### Runtime allocator is explicit opt-in
+### Custom allocators: the allocator is a type argument
 
-`allocate_unique<T>(allocator_ref, args...)` returns a different type,
-`allocated_unique_owner<T>`. It allocates the object through the byte allocator,
-constructs with global placement new, then uses the original concrete destructor
-and allocator callback. It does not invoke class-specific storage allocation or
-deallocation. Allocation failure/null and constructor unwinding follow the
-`allocator_ref` contract.
+`unique_owner<T, Alloc>` takes the allocator as its second template argument and
+the allocator object as its first constructor argument:
 
-That opt-in owner stores the access pointer, original allocation address,
-allocator context, deallocation function and concrete destruction function:
-**40 bytes on this ABI**, without a second heap allocation or reference count.
-Its preserved concrete cleanup also allows safe non-virtual-base ownership
-conversion. This extra capability and cost do not burden ordinary `make_unique`.
-The allocator context is borrowed and must remain valid through disposal; its
-`noexcept` deallocation callback must work on the eventual destruction thread.
+```cpp
+struct frame_pool_ref                        // any type with these two members
+{
+    frame_pool* pool;
+    void* allocate(std::size_t size, std::size_t alignment) { return pool->allocate(size, alignment); }
+    void deallocate(void* p, std::size_t size, std::size_t alignment) noexcept { pool->free(p, size, alignment); }
+};
 
-Neither owner supports copying, `release`, raw/reference adoption, raw reset,
-arbitrary user deleters, or conversion to the other owner kind/shared/weak
-ownership. Neither provides a retirement hook. They may move between synchronized
-threads, but concurrent mutation of the same handle is unsafe. Both retain the
-same pointer-sized non-owning `local_view` access model.
+own::unique_owner<mesh, frame_pool_ref> mesh_owner(frame_pool_ref{&pool}, vertices);
+auto same_thing = own::allocate_unique<mesh>(frame_pool_ref{&pool}, vertices);
+```
+
+| Second argument | Size (64-bit) | Constructed with | Base conversion |
+| --- | ---: | --- | --- |
+| omitted (`own::new_delete`) | 8 B | `std::in_place, args...` | virtual destructor required |
+| empty allocator type | 8 B | `std::in_place, args...` or `alloc, args...` | none (const only) |
+| allocator with state, e.g. a pool pointer | 8 B + its size | `alloc, args...` | none (const only) |
+| `own::allocator_ref` (runtime, per object) | 40 B | `ref, args...` or `std::in_place, args...` | any public base |
+
+- The owner keeps a copy of the allocator, moves it with the object, and on
+  release passes back exactly `sizeof(T)`/`alignof(T)`. That is also why a user
+  allocator's owner converts only to `const T`: through a base it would report
+  the wrong size. `allocate` may return null (reported as `std::bad_alloc`) or
+  throw; a throwing constructor's storage goes back to the same allocator
+- `allocate` and `deallocate` are a concept, `own::unique_allocator`, not
+  `std::allocator`; the allocator's copies must be `noexcept`, and `deallocate`
+  must be `noexcept` and work on whichever thread releases the owner
+- Owners with different allocators are different types, like containers with
+  different allocators, and never convert into one another. A function that
+  accepts owners from any pool can take `unique_owner<T, own::allocator_ref>`
+- `own::allocator_ref` chooses the allocator per object at run time. Its owner
+  stores the access pointer, original allocation, allocator context and
+  callback, and the concrete destructor (**40 bytes**, no second allocation), so
+  base conversions are valid without a virtual destructor
+  (`allocate_unique<T>(allocator_ref, args...)` returns this type). It was
+  called `allocated_unique_owner<T>`; that name remains as a deprecated alias
+- No allocator form invokes class-specific `operator new`/`delete`; the
+  allocator provides the storage and global placement new constructs in it
+
+No exclusive owner supports copying, `release`, raw/reference adoption, raw reset,
+arbitrary user deleters, or conversion to another allocator, to shared/weak
+ownership, or to a local owner. None provides a retirement hook. They may move
+between synchronized threads, but concurrent mutation of the same handle is
+unsafe. All share the pointer-sized non-owning `borrowed` view access model.
 
 [Exclusive-owner measurements](docs/unique_results.md) compare the lean default,
-its rejected 40-byte prototype, both standard baselines, and the opt-in type under
+its rejected 40-byte prototype, both standard baselines, and the opt-in
+`allocator_ref` type (then `allocated_unique_owner`) under
 matched lifetime contracts. Results distinguish forced-observable moves from
 optimized container/frame/job use; the former are not whole-engine timings.
 That 23,808-sample study did **not** establish the requested ~1% goal: the default
@@ -146,7 +198,7 @@ Publicly inherit from `enable_owner_from_this<T>`:
 struct node : own::enable_owner_from_this<node>
 {
     auto retain_for_job() { return shared_from_this(); }
-    auto inspect_locally() { return local_from_this(); } // non-owning local_view
+    auto inspect_locally() { return borrow_from_this(); } // non-owning borrowed view
 };
 auto node_owner = own::make_shared<node>();
 auto retained = node_owner->shared_from_this();
@@ -155,8 +207,8 @@ auto borrowed = node_owner->borrow_from_this();
 
 - `shared_from_this()` returns ownership of the **same** control block
 - `weak_from_this()` returns a weak observer
-- `borrow_from_this()` and `local_from_this()` are synonyms returning non-owning
-  views; the caller must already ensure lifetime throughout their use. Unlike
+- `borrow_from_this()` returns a non-owning view (`local_from_this()` is a
+  deprecated synonym); the caller must already ensure lifetime throughout its use. Unlike
   `owner.borrow()`, these methods make one relaxed atomic count load to check
   registration/liveness; they neither increment the count nor acquire ownership
 - Const overloads return `const T` access. Public, unambiguous derived/base and
@@ -177,7 +229,7 @@ A view extracted from a temporary successful weak lock does not keep that lock's
 ownership after the full expression ends; hold the locked owner throughout use.
 
 Unique factories do not register this mixin or create a shared control block.
-Under either `unique_owner` or `allocated_unique_owner`, its shared/weak/from-this
+Under any `unique_owner`, whatever its allocator, its shared/weak/from-this
 view methods remain empty; borrow from the owning handle for access. There is no `unique_from_this()` because it
 would create a second exclusive owner, and no automatic unique-to-shared promotion.
 
@@ -218,9 +270,13 @@ without memory-safety consequences; diagnostics are guaranteed only when every
 translation unit enables them.
 
 `local` does not mean an automatically enforced lexical lifetime. `local_owner`
-has actual thread confinement; `local_view` merely borrows a pointer and contains
-no thread ID, owner, or automatic validity check. Borrowed payload access still
-needs appropriate lifetime and synchronization.
+has actual thread confinement; a `borrowed` view merely borrows a pointer and
+contains no thread ID, owner, or automatic validity check. Borrowed payload access
+still needs appropriate lifetime and synchronization.
+
+If local owners cross DLL or shared-library boundaries, give every module one
+thread-ID provider ([Engine integration](#engine-integration)); otherwise the
+debug check sees one thread as two and aborts.
 
 `make_shared` coallocates object and a compact control block once (a 16-byte
 header, as dense as the standard library's); `make_local` and `allocate_local`
@@ -242,7 +298,7 @@ with the counts; declare such a hot type `alignas(64)` to give it its own line
 
 Factories: `make_unique`, `allocate_unique`, `make_shared`, `make_local`,
 `allocate_shared`, `allocate_local`. Default `make_unique` uses typed new/delete;
-`allocate_unique` returns the separate allocator-aware owner.
+`allocate_unique` returns `unique_owner<T, Alloc>` for the allocator it is given.
 An `allocator_ref` supplies non-owning byte-allocation callbacks with exact
 size/alignment matching. Null allocations throw `std::bad_alloc`; over-aligned
 payloads and constructor failure are supported. Keep allocator contexts alive
@@ -254,9 +310,82 @@ payload destruction. The engine must associate and wait for the actual GPU fence
 the library does not do GPU synchronization. Queues must define shutdown and
 capacity behavior. See [allocation and retirement contracts](docs/design.md).
 
+## Casts and identity
+
+```cpp
+own::shared_owner<component> any = find_component(entity);
+if (auto mesh = own::dynamic_owner_cast<mesh_renderer>(any))   // shares the same block
+{
+    draw(mesh.borrow());
+}
+auto exact = own::static_owner_cast<mesh_renderer>(std::move(any)); // transfers the reference
+
+std::unordered_map<own::object_id, std::string> names;
+names[own::identity(exact)] = "hero";            // no raw pointer needed for a key
+```
+
+- `static_owner_cast` / `dynamic_owner_cast` work on `shared_owner` and
+  `local_owner` like the standard pointer casts. A failed dynamic cast returns an
+  empty owner and leaves an rvalue source untouched: you never lose ownership by
+  asking. Const is never cast away
+- `unique_owner<T>` and `unique_owner<T, own::allocator_ref>` accept
+  `dynamic_owner_cast` from an rvalue only. For `unique_owner<T>` the target must
+  have a virtual destructor, because it deletes through that type; an owner with
+  a user allocator never holds a derived object through a base, so it has none
+- `own::identity(owner)` returns an `object_id`: comparable, ordered and hashable
+  (`std::hash` is provided), but not dereferenceable. All shared, weak and local
+  handles of one object, and every cast of it, share one key; a weak key survives
+  expiry. Like `std::owner_less`, a key can be reused once its storage is freed
+
+## Engine integration
+
+Settings are macros; define them in one wrapper header that every module
+includes instead of `<own/ownership.hpp>`:
+
+```cpp
+// engine/ownership.h
+#pragma once
+#define OWN_THREAD_ID_PROVIDER engine_own_thread_id
+#if defined(ENGINE_CORE_BUILD)
+#define OWN_THREAD_ID_PROVIDER_API __declspec(dllexport)
+#else
+#define OWN_THREAD_ID_PROVIDER_API __declspec(dllimport)
+#endif
+#define OWN_FAIL_FAST(reason) ::engine::fatal_error(::own::to_string(reason))
+#include <own/ownership.hpp>
+
+// engine/core/ownership.cpp, in exactly one module:
+#include "engine/ownership.h"
+OWN_DEFINE_THREAD_ID_PROVIDER()
+```
+
+- **`OWN_THREAD_ID_PROVIDER`**: by default each DLL (and each hidden-visibility
+  shared object) numbers threads on its own, so a `local_owner` made in one module
+  and copied in another on the same thread fails the debug thread check. One
+  shared provider fixes this. Only checked `local_owner` operations call it
+- **`OWN_FAIL_FAST(reason)`**: receives an `own::failure` (`use_after_release`,
+  `count_overflow`, `thread_mismatch`, ...) before the library aborts, for crash
+  reports. It must not return or throw
+- **Consistency**: on MSVC and clang-cl, mismatched `OWN_ENABLE_UNSAFE_GET_WARNING`,
+  `OWN_THREAD_ID_PROVIDER` or `OWN_FAIL_FAST` settings within one binary fail
+  to link (LNK2038). `OWN_DEBUG_THREAD_CHECK` may differ between translation
+  units by design
+- **CMake**: `add_subdirectory(ownership_cpp)` (or `find_package(ownership_cpp)`
+  after `cmake --install`) and link `own::ownership`
+
+[Design notes](docs/design.md#thread-identity-across-modules) explain each choice.
+
 ## Build, test and reproduce
 
 ```sh
+# Any compiler CMake supports, including MSVC and clang-cl
+# (on Windows, from a Visual Studio developer prompt: the compile-fail
+# tests run cl.exe directly and need its INCLUDE/LIB environment):
+cmake -S . -B build
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
+
+# GCC/Clang with sanitizers (debug, release, asan, ubsan, tsan or all):
 ./scripts/test.sh
 ./scripts/benchmark.sh
 make example
@@ -275,8 +404,13 @@ include a second identical std implementation as an A/A noise control, and recor
 the CPU, cores, frequency, SMT, compiler flags, workload, baseline and method for
 every run.
 
-Requires an existing C++20 compiler with exceptions and a POSIX shell for the
-supplied runners. The library itself is a single header under `include/own`.
+Requires a C++20 compiler with exceptions. The library itself is a single header
+under `include/own`; the CTest suite needs CMake 3.21, and the sanitizer and
+benchmark runners need a POSIX shell.
+
+Every `tests/compile_fail` case states why it must be rejected (`// expect:`
+patterns matched against the compiler's output), so a case cannot pass by failing
+for an unrelated reason such as a typo.
 
 The current [unique validation record](tests/results/unique/README.md) includes
 unique cases and reruns of the full regression suite. The earlier
@@ -295,31 +429,48 @@ lists the remaining measured costs and planned improvements, and the
 [optimization round](docs/optimization_round.md) records the latest before/after
 comparison across every harness.
 
-GCC 13 and Clang 18 on Linux x86-64 pass every mode (debug, release, ASan, UBSan,
-TSan) locally and in CI (`.github/workflows/ci.yml`), which also compiles every
-benchmark harness with `-Werror`, smoke-runs them and runs the examples. Clang's
-TSan builds link the shared sanitizer runtime because the allocation-failure tests
-replace the global `operator new`. Windows/MSVC, macOS and other architectures are
-not yet validated; Arm code generation was inspected but not timed. These are CPU
+CI (`.github/workflows/ci.yml`) runs:
+
+- GCC 13 and Clang 18 on Linux x86-64 in every mode (debug, release, ASan, UBSan,
+  TSan), and through CMake/CTest in Debug and Release
+- MSVC and clang-cl on Windows x64 through CMake/CTest in Debug and Release,
+  with `/W4 /WX /permissive-`, including the DLL-boundary test
+- every benchmark harness built with `-Werror` and smoke-run, and the examples
+
+Clang's TSan builds link the shared sanitizer runtime because the
+allocation-failure tests replace the global `operator new`. macOS and Arm are not
+validated, and no performance has been measured on Windows. These are CPU
 simulations, not measured engine integration or actual GPU execution.
 
 ## Current measured costs
 
 GCC 13.3, `-O3 -DNDEBUG -march=native`, one 4-vCPU Intel Xeon cloud VM, main
 harness with 101 samples after 5 warmups in two independent processes
-(primary / repeat, median ns per operation). Each case uses the same lifetime
-contract on both sides:
+(primary / repeat, median ns per operation). Both columns give the same lifetime
+guarantee: an owner usable from any thread.
 
-| Workload | own | `std::shared_ptr` |
+| Workload | `own::shared_owner` | `std::shared_ptr` |
 | --- | ---: | ---: |
 | `make_shared`, read, destroy (never shared) | 12.59 / 12.64 | 12.64 / 12.61 |
-| `make_local`, read, destroy | 15.31 / 15.35 | 12.64 / 12.61 |
 | Shared copy, read, drop | 11.28 / 11.26 | 16.82 / 16.83 |
-| Local alias copy, read, drop | 1.02 / 1.02 | 16.82 / 16.83 |
 | Weak lock of a live object | 15.05 / 15.09 | 17.01 / 17.10 |
-| Localize from a shared owner, read, drop | 13.03 / 12.99 | 15.03 / 15.06 |
 | Shared copies on two contending workers | 55.54 / 49.88 | 67.96 / 71.02 |
 | Shared copy/drop, four threads on one object (pinned) | 209.53 | 347.42 |
+
+`local_owner` gives a narrower guarantee (every copy stays on one thread), so it
+has no equivalent in the standard library. Its rows are listed separately; the
+`std::shared_ptr` figures are a reference point, not a like-for-like comparison:
+
+| Workload | `own::local_owner` | `std::shared_ptr` (reference) |
+| --- | ---: | ---: |
+| `make_local`, read, destroy | 15.31 / 15.35 | 12.64 / 12.61 |
+| Local alias copy, read, drop | 1.02 / 1.02 | 16.82 / 16.83 |
+| Localize from a shared owner, read, drop | 13.03 / 12.99 | 15.03 / 15.06 |
+
+Measured before the casts and integration hooks were added. Those changes leave the
+measured fast paths unchanged: with GCC 13 and Clang 18 at `-O3`, shared copy/drop,
+local alias copy/drop, weak lock and `make_shared`/destroy compile to the same
+instructions, apart from the cold abort branch, which now also passes the reason.
 
 `make_local` is the remaining slower row: its generated code is unchanged from
 a measurement at 13.4 ns, and the difference follows code placement in this
@@ -365,8 +516,9 @@ If a dependency needs the full standard pointer interface, using that interface
 there can be simpler than expanding this library preemptively.
 
 There is no full `std::unique_ptr` / `std::shared_ptr` parity. Arrays, `void` owners, aliasing ownership,
-atomic handle objects, owner-to-owner equality, ordering and hashing, raw adoption,
-arbitrary payload deleters and an STL allocator-traits adapter are omitted. Owners
+atomic handle objects, owner-to-owner equality and ordering, raw adoption,
+arbitrary payload deleters and an STL allocator-traits adapter are omitted; use
+`own::identity()` for map keys and ordering. Owners
 and views compare only with `nullptr` (`owner == nullptr`, `view != nullptr`);
 weak observers have no null comparison, use `expired()` or `lock()`. Payload destructors must
 be `noexcept`. Strong-reference cycles still need weak links. Strong and weak counts

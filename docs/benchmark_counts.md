@@ -57,17 +57,17 @@ Median ns, previous primary / repeat, variant A, adopted primary / repeat:
 | reader_with_copiers, own | 4.70 / 4.86 | 2.16 | 5.07 / 4.56 |
 | scan_16k_objects, own | 0.89 / 0.95 | 0.87 | 0.86 / 0.85 |
 
-Data: scaling [previous](../benchmarks/results/scaling_split_counts_primary/summary.csv)
-([repeat](../benchmarks/results/scaling_split_counts_repeat/summary.csv)),
-[variant A](../benchmarks/results/scaling_packed_precheck_primary/summary.csv),
-[adopted](../benchmarks/results/scaling_packed_counts_primary/summary.csv)
-([repeat](../benchmarks/results/scaling_packed_counts_repeat/summary.csv)); layout
-[previous](../benchmarks/results/layout_split_counts_primary/summary.csv)
-([repeat](../benchmarks/results/layout_split_counts_repeat/summary.csv)),
-[variant A](../benchmarks/results/layout_packed_precheck_primary/summary.csv),
-[adopted](../benchmarks/results/layout_packed_counts_primary/summary.csv)
-([repeat](../benchmarks/results/layout_packed_counts_repeat/summary.csv)).
-Codegen: [packed_counts_codegen.txt](../benchmarks/results/packed_counts_codegen.txt).
+Data: scaling [previous](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/scaling_split_counts_primary/summary.csv)
+([repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/scaling_split_counts_repeat/summary.csv)),
+[variant A](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/scaling_packed_precheck_primary/summary.csv),
+[adopted](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/scaling_packed_counts_primary/summary.csv)
+([repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/scaling_packed_counts_repeat/summary.csv)); layout
+[previous](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/layout_split_counts_primary/summary.csv)
+([repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/layout_split_counts_repeat/summary.csv)),
+[variant A](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/layout_packed_precheck_primary/summary.csv),
+[adopted](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/layout_packed_counts_primary/summary.csv)
+([repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/layout_packed_counts_repeat/summary.csv)).
+Codegen: [packed_counts_codegen.txt](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/packed_counts_codegen.txt).
 
 ## Analysis
 
@@ -107,10 +107,10 @@ low bit of its block address, carried by moves, cleared by copies). Main harness
 | copy_read_drop | 13.19 / 13.17 | **11.28 / 11.26** | 0.67 / 0.67 |
 | scaling, shared copy/drop, 4 threads (pinned) | 249.12 | 209.53 | 0.60 |
 
-Data: [primary](../benchmarks/results/hint_main_primary/summary.csv),
-[repeat](../benchmarks/results/hint_main_repeat/summary.csv),
-[scaling](../benchmarks/results/hint_scaling/summary.csv),
-[layout](../benchmarks/results/hint_layout/summary.csv). Side effects and their
+Data: [primary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/hint_main_primary/summary.csv),
+[repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/hint_main_repeat/summary.csv),
+[scaling](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/hint_scaling/summary.csv),
+[layout](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/hint_layout/summary.csv). Side effects and their
 analysis are in [the optimization round report](optimization_round.md).
 
 ## Limits

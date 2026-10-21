@@ -2,6 +2,10 @@
 # Self-contained GCC/Clang C++20 test runner; no downloaded test framework.
 set -euo pipefail
 
+# Compiler diagnostics in plain ASCII: under a UTF-8 locale GCC quotes names
+# with typographic quotes, which the compile-fail expectations do not use.
+export LC_ALL=C
+
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cxx=${CXX:-g++}
 build_root=${OWN_TEST_BUILD_DIR:-"$root/build/tests"}
@@ -72,6 +76,61 @@ run_mode() {
     "$output/allocated_unique_owner_tests"
     "$cxx" "${flags[@]}" "$root/tests/unique_default_allocation_tests.cpp" -o "$output/unique_default_allocation_tests"
     "$output/unique_default_allocation_tests"
+    "$cxx" "${flags[@]}" "$root/tests/api_extensions_tests.cpp" -o "$output/api_extensions_tests"
+    "$output/api_extensions_tests"
+    "$cxx" "${flags[@]}" "$root/tests/unique_allocator_tests.cpp" -o "$output/unique_allocator_tests"
+    "$output/unique_allocator_tests"
+    "$cxx" "${flags[@]}" "$root/tests/layout_tests.cpp" -o "$output/layout_tests"
+    "$output/layout_tests"
+
+    # OWN_FAIL_FAST receives the reason; the hook exits with 3 (an abort means it was bypassed).
+    "$cxx" "${flags[@]}" "$root/tests/fail_hook_tests.cpp" -o "$output/fail_hook_tests"
+    "$output/fail_hook_tests" none
+    local scenario status
+    for scenario in invalid_allocator thread_mismatch; do
+        set +e
+        "$output/fail_hook_tests" "$scenario" >"$output/fail_hook_$scenario.log" 2>&1
+        status=$?
+        set -e
+        if (( status != 3 )) || ! grep -q "reported" "$output/fail_hook_$scenario.log"; then
+            echo "FAIL fail hook: $scenario exited $status" >&2
+            cat "$output/fail_hook_$scenario.log" >&2
+            return 1
+        fi
+        echo "PASS fail hook: $scenario -> $(cat "$output/fail_hook_$scenario.log")"
+    done
+
+    # A local_owner made in a shared library and copied on the same thread in the
+    # executable. Hidden visibility gives each binary private inline statics, as
+    # every DLL has on Windows. Sanitizer runtimes do not mix well with this
+    # extra shared object, so it runs in the plain modes.
+    if [[ "$selected" == debug || "$selected" == release ]]; then
+        local boundary="$root/tests/module_boundary" provider
+        for provider in 1 0; do
+            local dir="$output/module_boundary_$provider"
+            mkdir -p "$dir"
+            "$cxx" "${flags[@]}" -DBOUNDARY_SHARED_PROVIDER="$provider" -fPIC -shared \
+                -fvisibility=hidden -fvisibility-inlines-hidden "$boundary/module.cpp" -o "$dir/libboundary.so"
+            "$cxx" "${flags[@]}" -DBOUNDARY_SHARED_PROVIDER="$provider" \
+                -fvisibility=hidden -fvisibility-inlines-hidden "$boundary/main.cpp" -L"$dir" -lboundary \
+                -Wl,-rpath,"$dir" -o "$dir/main"
+            set +e
+            "$dir/main" >"$dir/run.log" 2>&1
+            status=$?
+            set -e
+            if [[ "$provider" == 1 && "$status" != 0 ]]; then
+                echo "FAIL module boundary with a shared thread-ID provider (exit $status)" >&2
+                cat "$dir/run.log" >&2
+                return 1
+            fi
+            if [[ "$provider" == 0 ]] && ! grep -q "ABORTED by the local_owner thread check" "$dir/run.log"; then
+                echo "FAIL module boundary control: per-binary IDs were expected to abort (exit $status)" >&2
+                cat "$dir/run.log" >&2
+                return 1
+            fi
+        done
+        echo "PASS module boundary: shared provider passes; per-binary control aborts as documented"
+    fi
 
     # Death tests intentionally abort. Run them without a sanitizer so the
     # signal result tests the contract rather than sanitizer signal handling.
@@ -142,10 +201,39 @@ run_mode() {
             "$root/tests/multi_tu_main.cpp" -o "$output/multi_tu_warning_0"
         "$output/multi_tu_warning_0"
         echo "PASS unsafe_get contract and warning-disabled multi-TU link"
+        # Each case must be rejected for its stated reason: every "// expect: <ERE>"
+        # line must match the compiler output. "// only: clang" limits a case to
+        # one compiler family (for example Clang's lifetime analysis).
+        local family=gcc
+        if "$cxx" --version 2>/dev/null | grep -qi clang; then family=clang; fi
         for source in "$root"/tests/compile_fail/*.cpp; do
             name=$(basename "$source" .cpp)
+            local only
+            only=$(sed -n 's#^// only: ##p' "$source")
+            if [[ -n "$only" && "$only" != "$family" ]]; then
+                echo "SKIP compile rejection: $name (only: $only)"
+                continue
+            fi
             if "$cxx" "${flags[@]}" -UOWN_ENABLE_UNSAFE_GET_WARNING -DOWN_ENABLE_UNSAFE_GET_WARNING=0 -Wno-unused-variable -Wno-unused-but-set-variable -c "$source" -o "$output/$name.o" >"$output/$name.log" 2>&1; then
                 echo "FAIL compile rejection: $name unexpectedly compiled" >&2
+                return 1
+            fi
+            if grep -Eq "fatal error: .*(No such file or directory|file not found)" "$output/$name.log"; then
+                echo "FAIL compile rejection: $name could not find a header; the compiler environment is broken" >&2
+                cat "$output/$name.log" >&2
+                return 1
+            fi
+            local expectations=0 pattern
+            while IFS= read -r pattern; do
+                expectations=$((expectations + 1))
+                if ! grep -Eq -- "$pattern" "$output/$name.log"; then
+                    echo "FAIL compile rejection: $name was rejected for another reason; missing: $pattern" >&2
+                    cat "$output/$name.log" >&2
+                    return 1
+                fi
+            done < <(sed -n 's#^// expect: ##p' "$source")
+            if (( expectations == 0 )); then
+                echo "FAIL compile rejection: $name has no // expect: line" >&2
                 return 1
             fi
             echo "PASS compile rejection: $name"
@@ -154,22 +242,27 @@ run_mode() {
     echo "PASS $selected (including isolated header and multi-translation-unit link)"
 }
 
+# Several modes run in separate invocations, so one failing mode never hides
+# the result of the others; every failed mode is listed at the end.
+run_modes() {
+    local failed=() selected
+    for selected in "$@"; do
+        if "$0" "$selected"; then :; else
+            failed+=("$selected")
+        fi
+    done
+    if (( ${#failed[@]} )); then
+        echo "FAIL modes: ${failed[*]} (see compiler/runtime output above)" >&2
+        exit 1
+    fi
+}
+
 case "$mode" in
     default)
-        run_mode debug
-        run_mode release
+        run_modes debug release
         ;;
     all)
-        # Run modes in separate invocations so a failing sanitizer does not
-        # suppress the remaining checks and every failed stage stays visible.
-        failed=0
-        for selected in debug release asan ubsan tsan; do
-            if "$0" "$selected"; then :; else
-                echo "FAIL mode: $selected (see compiler/runtime output above)" >&2
-                failed=1
-            fi
-        done
-        exit "$failed"
+        run_modes debug release asan ubsan tsan
         ;;
     *) run_mode "$mode" ;;
 esac

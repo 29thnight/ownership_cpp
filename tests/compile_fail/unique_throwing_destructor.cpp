@@ -1,3 +1,5 @@
+// expect: static assert
+// expect: owned\ destructors\ must\ be\ accessible\ and\ noexcept
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

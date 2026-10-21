@@ -72,11 +72,11 @@ struct self_aware : own::enable_owner_from_this<self_aware> {
     explicit self_aware(int& count, bool& destructor_state)
         : destroyed(&count),
           constructor_unbound(!shared_from_this() && weak_from_this().expired() &&
-                              !borrow_from_this() && !local_from_this()),
+                              !borrow_from_this()),
           destructor_unbound(&destructor_state) {}
     ~self_aware() {
         *destructor_unbound = !shared_from_this() && weak_from_this().expired() &&
-                              !borrow_from_this() && !local_from_this();
+                              !borrow_from_this();
         ++*destroyed;
     }
 };
@@ -117,8 +117,8 @@ static_assert(!std::is_constructible_v<own::shared_owner<int>, own::unique_owner
 static_assert(!std::is_constructible_v<own::local_owner<int>, own::unique_owner<int>>);
 static_assert(!std::is_constructible_v<own::weak_owner<int>, own::unique_owner<int>>);
 static_assert(!std::is_constructible_v<own::unique_owner<int>, own::local_view<int>>);
-static_assert(!std::is_constructible_v<own::unique_owner<int>, own::allocated_unique_owner<int>>);
-static_assert(!std::is_constructible_v<own::allocated_unique_owner<int>, own::unique_owner<int>>);
+static_assert(!std::is_constructible_v<own::unique_owner<int>, own::unique_owner<int, own::allocator_ref>>);
+static_assert(!std::is_constructible_v<own::unique_owner<int, own::allocator_ref>, own::unique_owner<int>>);
 static_assert(!has_get<own::unique_owner<int>> && !has_release<own::unique_owner<int>>);
 static_assert(!has_use_count<own::unique_owner<int>> && !has_raw_reset<own::unique_owner<int>>);
 static_assert(!has_rvalue_borrow<own::unique_owner<int>> && !has_rvalue_borrow<const own::unique_owner<int>>);
@@ -267,10 +267,10 @@ void self_registration_stays_unbound() {
     auto owner = own::make_unique<self_aware>(destroyed, destructor_unbound);
     CHECK(owner->constructor_unbound);
     CHECK(!owner->shared_from_this() && owner->weak_from_this().expired());
-    CHECK(!owner->borrow_from_this() && !owner->local_from_this());
+    CHECK(!owner->borrow_from_this());
     const auto& payload = *owner;
     CHECK(!payload.shared_from_this() && payload.weak_from_this().expired());
-    CHECK(!payload.borrow_from_this() && !payload.local_from_this());
+    CHECK(!payload.borrow_from_this());
     auto moved = std::move(owner);
     CHECK(!moved->shared_from_this());
     moved.reset();

@@ -1,3 +1,4 @@
+// expect: (cannot convert '(own::)?unique_owner<int(, ?(\(default\) )?(\[\.\.\.\]|(own::)?new_delete))?>' to 'int\*'|no viable conversion from '(own::)?unique_owner<int(, ?(\(default\) )?(\[\.\.\.\]|(own::)?new_delete))?>' to 'int \*')
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>
