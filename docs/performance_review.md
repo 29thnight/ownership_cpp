@@ -123,3 +123,25 @@ GCC 13.3 `-O3 -DNDEBUG`, 4 vCPU Xeon 클라우드 VM, 코어 하나 고정, 2~3�
   않아 차이가 없고, mimalloc·jemalloc·tcmalloc이나 엔진이 전역 new를 교체한 경우에 크기 조회를
   생략할 수 있습니다(여기서는 측정하지 않음). Clang 18은 기본값이 꺼져 있어 `-fsized-deallocation`
   없이는 기존 형태로 남습니다.
+
+### 6.1 마지막 해제를 블록 타입별 함수 하나로
+
+마지막 강한 참조 해제는 `ops->dispose`와 `ops->destroy` 두 번의 간접 호출에 retirement
+hook 조회까지 거쳤습니다. hook이 있을 수 없는 `make_shared`/`make_local` 블록도 마찬가지였습니다.
+이제 블록 타입마다 `release_block<Block>` 하나가 해제 전체를 맡습니다. 간접 호출은 한 번이고,
+payload 소멸자와 메모리 해제는 그 안에 인라인됩니다. hook이 있는 블록은 기존처럼
+`retirement_task`를 hook에 넘깁니다.
+
+GCC 13.3과 Clang 18 `-O3`, 코어 하나 고정. GCC는 변경 전후를 번갈아 9번, Clang은 3번 실행해
+중앙값을 비교했습니다.
+
+| 경우 | GCC 변화 | Clang 이전 → 이후 |
+|---|---:|---:|
+| `make_shared`, 공유 안 됨 (fresh hint) | −11.4% | 13.7~15.6 → 11.4~11.8 ns |
+| `make_local` 생성·소멸 | −8.5% | 14.5~15.7 → 13.1~13.2 ns |
+| `std::string` 포함 payload | −5.0% | 24.2~24.6 → 23.0~23.5 ns |
+| weak 관찰자가 남은 채 해제 | −2.7% | 40.6~42.2 → 40.3~41.4 ns |
+| 한 번 복사 후 해제 (`fetch_sub` 경로) | +2.7% | 37.5~38.9 → 37.5~42.7 ns |
+
+마지막 행은 GCC 최소값 기준으로도 +2.7%라서 노이즈로 단정하지 않고 그대로 기록합니다.
+Clang에서는 같은 경로에 일관된 변화가 없었습니다.

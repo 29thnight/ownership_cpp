@@ -155,6 +155,7 @@ namespace own
     template<class T> class borrowed;
     template<class T> class enable_owner_from_this;
     class retirement_task;
+    struct retirement_hook;
     class object_id;
 
     namespace detail
@@ -260,6 +261,7 @@ namespace own
         struct control_block;
         struct owner_access;
         void last_strong_released(control_block*) noexcept;
+        void retire_through_hook(control_block*, const retirement_hook&) noexcept;
     }
 
     // A non-owning byte allocator. Its context must outlive all allocations,
@@ -307,7 +309,7 @@ namespace own
     private:
         explicit retirement_task(detail::control_block* block) noexcept : block_(block) {}
         detail::control_block* block_ = nullptr;
-        friend void detail::last_strong_released(detail::control_block*) noexcept;
+        friend void detail::retire_through_hook(detail::control_block*, const retirement_hook&) noexcept;
     };
 
     namespace detail
@@ -323,8 +325,9 @@ namespace own
         {
             void (*dispose)(control_block*) noexcept;
             void (*destroy)(control_block*) noexcept;
-            // Null for compact blocks, which have no retirement hook.
-            retirement_hook* (*retirement)(control_block*) noexcept;
+            // The whole last-strong release for one block type, so its payload
+            // destructor and deallocation inline into a single indirect call.
+            void (*release)(control_block*) noexcept;
         };
 
         // Both reference counts share one 64-bit word: strong in the low half,
@@ -404,10 +407,36 @@ namespace own
         {
             // Zero is permanent. Keeping the implicit weak alive permits
             // deferred destruction without successful weak locking.
-            retirement_hook hook;
-            if (auto* hook_of = block->ops->retirement) { hook = *hook_of(block); }
-            retirement_task task(block);
-            if (hook.retire) { hook.retire(hook.context, std::move(task)); }
+            block->ops->release(block);
+        }
+
+        // A hook receives the task; a task it drops runs immediately.
+        inline void retire_through_hook(control_block* block, const retirement_hook& hook) noexcept
+        {
+            hook.retire(hook.context, retirement_task(block));
+        }
+
+        // The typed body of control_ops::release: dispose, then drop the
+        // implicit weak reference, with no indirect call for either step.
+        template<class Block>
+        void release_block(control_block* base) noexcept
+        {
+            if constexpr (Block::has_retirement_hook)
+            {
+                const retirement_hook& hook = static_cast<Block*>(base)->retirement;
+                if (hook.retire)
+                {
+                    retire_through_hook(base, hook);
+                    return;
+                }
+            }
+            Block::dispose_object(base);
+            // As release_weak: no other reference means no read-modify-write.
+            if (base->counts.load(std::memory_order_acquire) == weak_one ||
+                weak_of(base->counts.fetch_sub(weak_one, std::memory_order_acq_rel)) == 1)
+            {
+                Block::destroy_control(base);
+            }
         }
 
         inline void release_strong(control_block* block) noexcept
@@ -639,7 +668,7 @@ namespace own
         }
         template<class Block>
         inline constexpr control_ops ops_for{Block::dispose_object, Block::destroy_control,
-                                             Block::retirement_of};
+                                             release_block<Block>};
 
         // make_local and allocate_local reserve storage for their first local
         // group inside the block, so creating a local owner is one allocation.
@@ -681,7 +710,7 @@ namespace own
                 block->~in_place_control();
                 default_deallocate(nullptr, block, sizeof(in_place_control), alignof(in_place_control));
             }
-            static constexpr retirement_hook* (*retirement_of)(control_block*) noexcept = nullptr;
+            static constexpr bool has_retirement_hook = false;
         };
 
         // allocate_* and *_with factories: carries the deallocation callback and
@@ -717,10 +746,7 @@ namespace own
                 block->~allocated_control();
                 release(resource, block, sizeof(allocated_control), alignof(allocated_control));
             }
-            static retirement_hook* retirement_of(control_block* base) noexcept
-            {
-                return &static_cast<allocated_control*>(base)->retirement;
-            }
+            static constexpr bool has_retirement_hook = true;
         };
 
     }
