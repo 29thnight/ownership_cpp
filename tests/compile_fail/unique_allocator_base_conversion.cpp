@@ -1,4 +1,5 @@
-// expect: conversion from '[^']*unique_owner<derived, ?(\[\.\.\.\]|pool)>' to (non-scalar type )?'[^']*unique_owner<base, ?(\[\.\.\.\]|pool)>'
+// expect: conversion from '[^']*unique_owner<derived, ?(\[\.\.\.\]|pool)
+// expect: to (non-scalar type )?'[^']*unique_owner<base, ?(\[\.\.\.\]|pool)>'
 #include <own/ownership.hpp>
 #include <cstddef>
 #include <new>
