@@ -1,4 +1,5 @@
-// expect: conversion from '[^']*unique_owner<(int|\[\.\.\.\]), ?(own::)?allocator_ref>' to (non-scalar type )?'[^']*unique_owner<(int|\[\.\.\.\])(, ?(\(default\) )?(own::)?new_delete)?>'
+// expect: conversion from '[^']*unique_owner<(int|\[\.\.\.\]), ?(own::)?allocator_ref>
+// expect: to (non-scalar type )?'[^']*unique_owner<(int|\[\.\.\.\])(, ?(\(default\) )?(own::)?new_delete)?>'
 #include <own/ownership.hpp>
 #include <utility>
 
