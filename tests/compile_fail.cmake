@@ -67,6 +67,13 @@ execute_process(
 if(result EQUAL 0)
     message(FATAL_ERROR "${name} compiled, but it must be rejected")
 endif()
+# A missing header is never the reason a case exists. It means the compiler
+# environment is broken (for example cl.exe run outside a Visual Studio
+# developer environment), and every case would "pass" for the wrong reason.
+if(output MATCHES "C1083|Cannot open include file|fatal error: '?[^ ']*'? ?file not found|No such file or directory")
+    message(FATAL_ERROR "${name}: the compiler could not find a header; fix the compiler environment"
+        " (for cl.exe run ctest from a Visual Studio developer prompt)\n${output}")
+endif()
 
 if(family STREQUAL "msvc" AND NOT EXPECT_ON_MSVC)
     message("PASS ${name} rejected (cl.exe: reason not checked)")

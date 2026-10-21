@@ -58,6 +58,20 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      # The compile-fail tests invoke cl.exe directly, which needs the
+      # INCLUDE/LIB/PATH of a developer prompt to find the standard headers.
+      - name: Visual Studio developer environment
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          cmd /c "`"$vcvars`" >nul && set" | ForEach-Object {
+            if ($_ -match '^(INCLUDE|LIB|LIBPATH|PATH|VCToolsInstallDir|WindowsSdkDir)=(.*)$') {
+              "$($Matches[1])=$($Matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            }
+          }
       - name: Configure
         run: cmake -S . -B build ${{ matrix.configure }} 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
       - name: Build (Debug)
