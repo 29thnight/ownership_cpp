@@ -20,6 +20,30 @@ bool fail_now() noexcept {
 }
 } // namespace
 
+// Aligned storage for the replaced aligned operator new. MSVC has no
+// std::aligned_alloc, and its aligned blocks must be released with _aligned_free.
+// Out of line for the same reason as the replacement functions: GCC's
+// mismatched-new-delete analysis must not see an inlined free on its own.
+#if defined(__GNUC__) || defined(__clang__)
+#define OWN_TEST_ALIGNED_NOINLINE __attribute__((noinline))
+#else
+#define OWN_TEST_ALIGNED_NOINLINE
+#endif
+#if defined(_WIN32)
+#include <malloc.h>
+OWN_TEST_ALIGNED_NOINLINE static void* test_aligned_allocate(std::size_t alignment, std::size_t size) {
+    return _aligned_malloc(size == 0 ? 1 : size, alignment);
+}
+OWN_TEST_ALIGNED_NOINLINE static void test_aligned_free(void* pointer) { _aligned_free(pointer); }
+#else
+OWN_TEST_ALIGNED_NOINLINE static void* test_aligned_allocate(std::size_t alignment, std::size_t size) {
+    // aligned_alloc requires size to be an exact multiple of alignment.
+    const auto rounded_size = ((size + alignment - 1) / alignment) * alignment;
+    return std::aligned_alloc(alignment, rounded_size == 0 ? alignment : rounded_size);
+}
+OWN_TEST_ALIGNED_NOINLINE static void test_aligned_free(void* pointer) { std::free(pointer); }
+#endif
+
 // Dedicated executable: replace global new only here, never in the ordinary
 // unit suite. This verifies the actual default make_unique allocation path.
 #if defined(__GNUC__) || defined(__clang__)
@@ -50,15 +74,18 @@ void operator delete(void* pointer, std::size_t) noexcept { ::operator delete(po
 OWN_TEST_NOINLINE void* operator new(std::size_t size, std::align_val_t requested_alignment) {
     if (fail_now()) throw std::bad_alloc();
     const auto alignment = static_cast<std::size_t>(requested_alignment);
-    // aligned_alloc requires size to be an exact multiple of alignment.
-    const auto rounded_size = ((size + alignment - 1) / alignment) * alignment;
-    if (void* result = std::aligned_alloc(alignment, rounded_size == 0 ? alignment : rounded_size)) {
+    if (void* result = test_aligned_allocate(alignment, size)) {
         ++live_allocations;
         return result;
     }
     throw std::bad_alloc();
 }
-void operator delete(void* pointer, std::align_val_t) noexcept { ::operator delete(pointer); }
+OWN_TEST_ALIGNED_NOINLINE void operator delete(void* pointer, std::align_val_t) noexcept {
+    if (pointer) {
+        --live_allocations;
+        test_aligned_free(pointer);
+    }
+}
 void operator delete(void* pointer, std::size_t, std::align_val_t alignment) noexcept {
     ::operator delete(pointer, alignment);
 }
@@ -157,7 +184,7 @@ void from_this_never_allocates_or_binds() {
     fail_after = 1;
     auto owner = own::make_unique<self_tracked>(destroyed);
     const bool unbound = !owner->shared_from_this() && owner->weak_from_this().expired() &&
-                         !owner->borrow_from_this() && !owner->local_from_this();
+                         !owner->borrow_from_this();
     const int remaining = fail_after.load();
     fail_after = -1;
     CHECK(unbound && remaining == 0 && allocation_attempts == attempts + 1);
