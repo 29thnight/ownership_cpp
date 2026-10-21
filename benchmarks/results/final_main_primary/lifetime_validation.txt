@@ -1,0 +1,5 @@
+own: old hot-reload version retained by scene and global frame lease; weak cache expired at last strong; destructor waited for simulated fence; both versions destroyed exactly once: PASS
+std: equivalent custom-deleter lifetime sequence: PASS
+own borrow: one explicit shared pin retained payload after sole original reset; copying views did not change strong count; weak lock preceded borrow; final pin destruction destroyed payload exactly once: PASS
+std borrow: equivalent retained-owner raw pointer and one explicit shared pin lifetime sequence: PASS
+Fences are monotonically advanced integers; no GPU, renderer, graphics driver, or actual completion event is measured. Deferred std payloads use a separate allocation because make_shared cannot accept a custom deleter. This validation is untimed.

@@ -1,0 +1,40 @@
+case / implementation: median, p95, p99 ns per unit
+copy_read_drop / std_shared: 12.116, 15.706, 17.867
+copy_read_drop / own_shared: 4.700, 6.614, 7.826
+copy_read_drop / own_local: 1.221, 1.962, 2.396
+borrow_read / raw_borrow: 0.544, 0.690, 1.132
+localize_read_drop / std_shared: 12.145, 15.851, 26.205
+localize_read_drop / own_local: 11.277, 14.349, 16.574
+group_setup_then_1_copies / std_shared: 19.360, 25.632, 35.266
+group_setup_then_1_copies / own_local: 25.757, 32.680, 41.653
+group_setup_then_8_copies / std_shared: 105.963, 139.595, 185.381
+group_setup_then_8_copies / own_local: 29.904, 42.843, 48.130
+group_setup_then_64_copies / std_shared: 776.276, 958.447, 1098.083
+group_setup_then_64_copies / own_local: 111.009, 155.871, 276.574
+group_setup_then_1024_copies / std_shared: 12292.402, 15870.485, 28743.237
+group_setup_then_1024_copies / own_local: 1427.577, 2078.845, 2330.660
+share_read_drop / std_shared: 12.050, 16.487, 24.947
+share_read_drop / own_shared: 4.638, 6.847, 7.537
+create_read_destroy / std_shared: 11.838, 15.943, 19.796
+create_read_destroy / own_shared: 12.639, 16.787, 19.657
+create_read_destroy / own_local: 22.440, 27.746, 38.278
+weak_lock_live / std_shared: 9.407, 13.071, 16.063
+weak_lock_live / own_shared: 4.707, 6.333, 9.114
+weak_lock_expired / std_shared: 1.628, 2.750, 3.599
+weak_lock_expired / own_shared: 1.356, 1.996, 2.441
+contended_copy_2_workers / std_shared: 23.405, 29.971, 39.112
+contended_copy_2_workers / own_shared: 12.419, 23.522, 29.233
+scene_4096_attachments / std_shared: 5.243, 6.901, 8.118
+scene_4096_attachments / own_local: 1.534, 2.369, 4.626
+frame_4096_draws_64_unique_leases / std_shared: 3879.917, 7781.917, 13956.042
+frame_4096_draws_64_unique_leases / own_shared: 3878.208, 6319.750, 12031.958
+resource_lifecycle_64_assets_4096_objects / std_shared: 34895.600, 53541.200, 62890.000
+resource_lifecycle_64_assets_4096_objects / own_local: 24300.000, 39436.800, 61687.200
+async_queue_job_1_local_copies / std_shared: 557.720, 877.700, 1639.030
+async_queue_job_1_local_copies / own_local: 587.060, 1166.620, 2721.220
+async_queue_job_64_local_copies / std_shared: 2070.770, 2990.330, 4288.550
+async_queue_job_64_local_copies / own_local: 856.570, 1341.880, 2403.360
+async_queue_job_1024_local_copies / std_shared: 17231.090, 22935.620, 36661.220
+async_queue_job_1024_local_copies / own_local: 4173.370, 5946.900, 7015.180
+Output: "benchmarks/results/20261007_ae6caf8_rerun_repeat"
+Checksum: 20688493065280

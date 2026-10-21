@@ -1,0 +1,11 @@
+scenario,implementation,allocation_calls,deallocation_calls,total_requested_bytes,peak_requested_bytes,live_bytes_after_release
+create_shared,std_shared,1,1,104,104,0
+create_shared,own_shared,1,1,160,160,0
+create_local,std_shared,1,1,104,104,0
+create_local,own_local,2,2,200,200,0
+one_group_4096_attachments,std_shared,1,1,104,104,0
+one_group_4096_attachments,own_local,2,2,200,200,0
+4096_independent_localizations,std_shared,1,1,104,104,0
+4096_independent_localizations,own_local,4097,4097,164000,164000,0
+retained_shared_4096_borrows,std_raw_borrow,1,1,104,104,0
+retained_shared_4096_borrows,own_local_view,1,1,160,160,0

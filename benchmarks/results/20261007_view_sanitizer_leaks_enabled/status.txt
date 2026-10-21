@@ -1,0 +1,3 @@
+exit_status=1
+ASAN_OPTIONS=detect_leaks=1
+UBSAN_OPTIONS=halt_on_error=1

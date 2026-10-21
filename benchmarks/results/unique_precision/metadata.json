@@ -1,0 +1,57 @@
+{
+  "study": "Frozen baseline versus final candidate; separate independent processes in ABBA order",
+  "final_header_sha256": "17a1fdb0773ae287fc8955eecb629c20f7052c18324d1efd53554d4ed27cc90d",
+  "baseline_header_sha256": "4f13b3edcab3a52d7307fcad05b9da8fdcf7333264e5724eb8107e663445b225",
+  "compiler": "GCC 14.2.0 / libstdc++",
+  "architecture": "x86_64",
+  "operating_system": "Debian 13 / Linux 6.18.44",
+  "cpu": "AMD EPYC 9V74, shared cloud VM",
+  "flags": "-std=c++20 -O3 -DNDEBUG -march=native -pthread -Wall -Wextra -Wpedantic",
+  "affinity": {
+    "main_cpu": 2,
+    "queue_worker_cpu": 3,
+    "exclusive_physical_host": false
+  },
+  "processes_per_header": 4,
+  "blocks_per_case_per_process": 31,
+  "passes_per_block": 2,
+  "implementations_per_block": 8,
+  "target_observation_ms": 25,
+  "timed_rows": 23808,
+  "diagnostic_rows_per_header": 48,
+  "seeds": [
+    20261007,
+    20268926,
+    20276845,
+    20284764
+  ],
+  "process_schedule": [
+    "baseline0",
+    "candidate0",
+    "candidate1",
+    "baseline1",
+    "baseline2",
+    "candidate2",
+    "candidate3",
+    "baseline3"
+  ],
+  "original_counts": {
+    "create": 50000,
+    "move": 500000,
+    "borrow": 1000000,
+    "frames": 64,
+    "vector_batches": 64,
+    "jobs": 2048
+  },
+  "workload": "64-byte payload; 256 resources/4096 views per frame; 1024 transferred owners per vector batch; queue capacity 64. Original complete batches are repeated to lengthen observations. No global allocation replacement or pool.",
+  "analysis": "Geometric mean of forward/reverse paired wall-time ratios; equal weight per independent process. Primary interval: Student t over process mean log ratios. No outlier removal. Familywise upper bound Bonferroni-adjusts twelve real own/std workload comparisons. A/A controls assess harness precision and layout sensitivity; repeated processes do not vary code layout.",
+  "criterion": "Roughly 1% regression target NOT MET. A/A noise, code-placement effects, and remaining matched-state move/vector costs prevent an all-workload claim.",
+  "source_hashes": {
+    "README.md": "9531c1d79c62e1490666e81a12ad1bd5ee2380eec8ad63efb97c8cc1a33b06d0",
+    "analyze.py": "005edd7ca7416e68e5829e0a1d36db299776d4a324ace5f8e9342a278b342072",
+    "baseline/include/own/ownership.hpp": "4f13b3edcab3a52d7307fcad05b9da8fdcf7333264e5724eb8107e663445b225",
+    "driver.cpp": "21daa0fc2b07f59ddceafc35869de7c54b12ebd04eb428714404d4857257991b",
+    "run.sh": "5eee71f3ed9845e79679dd9c6903ca36d5797d9b089986bc9b15911ed7b6686f",
+    "workloads.inc": "db68d70c05a84a7d9b2c18591370f9d6ae06e2198d666cf55e12e3227c6b8228"
+  }
+}

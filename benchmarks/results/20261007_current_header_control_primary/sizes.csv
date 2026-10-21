@@ -1,0 +1,7 @@
+type,sizeof_bytes
+asset,88
+std_shared_ptr,16
+std_weak_ptr,16
+own_shared_owner,16
+own_local_owner,16
+own_weak_owner,16

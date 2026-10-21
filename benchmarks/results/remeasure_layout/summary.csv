@@ -1,0 +1,17 @@
+case,implementation,samples,median_ns,min_ns,p90_ns,cv
+create_read_destroy,own,15,18.1052,17.1891,19.135,0.0312542
+scan_16k_objects,own,15,0.884074,0.831828,1.14014,0.127227
+scan_256k_objects,own,15,6.30894,5.42246,7.07933,0.100247
+reader_with_copiers,own,15,4.21237,1.9189,4.90376,0.216429
+create_read_destroy,own_a64,15,20.5369,19.575,22.4985,0.0929064
+scan_16k_objects,own_a64,15,1.39093,1.18065,1.53612,0.195794
+scan_256k_objects,own_a64,15,9.97047,9.29577,10.2622,0.0323626
+reader_with_copiers,own_a64,15,0.265788,0.25962,0.313959,0.073412
+create_read_destroy,std_a,15,11.6117,10.879,13.1455,0.0613528
+scan_16k_objects,std_a,15,0.888904,0.841445,1.03941,0.128949
+scan_256k_objects,std_a,15,6.23752,5.79432,7.34013,0.0849247
+reader_with_copiers,std_a,15,2.10998,1.16951,2.44311,0.213817
+create_read_destroy,std_b,15,11.5596,11.075,11.8559,0.0545517
+scan_16k_objects,std_b,15,0.906874,0.832365,1.14025,0.145181
+scan_256k_objects,std_b,15,6.34489,5.95037,8.4928,0.123272
+reader_with_copiers,std_b,15,2.07219,1.05112,2.44823,0.285601

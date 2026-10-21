@@ -1,0 +1,40 @@
+case / implementation: median, p95, p99 ns per unit
+copy_read_drop / std_shared: 12.649, 12.729, 12.729
+copy_read_drop / own_shared: 24.396, 25.128, 25.128
+copy_read_drop / own_local: 45.037, 70.915, 70.915
+borrow_read / raw_borrow: 3.875, 5.779, 5.779
+localize_read_drop / std_shared: 15.604, 15.683, 15.683
+localize_read_drop / own_local: 263.118, 356.617, 356.617
+group_setup_then_1_copies / std_shared: 61.100, 5120.517, 5120.517
+group_setup_then_1_copies / own_local: 284.110, 336.527, 336.527
+group_setup_then_8_copies / std_shared: 135.640, 162.640, 162.640
+group_setup_then_8_copies / own_local: 677.400, 703.600, 703.600
+group_setup_then_64_copies / std_shared: 853.156, 1559.188, 1559.188
+group_setup_then_64_copies / own_local: 3256.375, 3387.812, 3387.812
+group_setup_then_1024_copies / std_shared: 12540.406, 17920.875, 17920.875
+group_setup_then_1024_copies / own_local: 60342.625, 109610.094, 109610.094
+share_read_drop / std_shared: 14.291, 17.476, 17.476
+share_read_drop / own_shared: 30.635, 31.426, 31.426
+create_read_destroy / std_shared: 333.022, 2439.555, 2439.555
+create_read_destroy / own_shared: 344.589, 422.455, 422.455
+create_read_destroy / own_local: 696.870, 739.203, 739.203
+weak_lock_live / std_shared: 69.382, 998.696, 998.696
+weak_lock_live / own_shared: 26.449, 27.451, 27.451
+weak_lock_expired / std_shared: 44.235, 104.844, 104.844
+weak_lock_expired / own_shared: 21.001, 21.762, 21.762
+contended_copy_2_workers / std_shared: 54.906, 88.479, 88.479
+contended_copy_2_workers / own_shared: 80.995, 89.638, 89.638
+scene_4096_attachments / std_shared: 20.399, 38.507, 38.507
+scene_4096_attachments / own_local: 30.993, 37.098, 37.098
+frame_4096_draws_64_unique_leases / std_shared: 40482.250, 49593.250, 49593.250
+frame_4096_draws_64_unique_leases / own_shared: 62983.000, 97787.000, 97787.000
+resource_lifecycle_64_assets_4096_objects / std_shared: 186325.000, 215859.000, 215859.000
+resource_lifecycle_64_assets_4096_objects / own_local: 515472.000, 753464.000, 753464.000
+async_queue_job_1_local_copies / std_shared: 3123.344, 9266.188, 9266.188
+async_queue_job_1_local_copies / own_local: 2479.594, 3972.438, 3972.438
+async_queue_job_64_local_copies / std_shared: 4884.094, 84210.375, 84210.375
+async_queue_job_64_local_copies / own_local: 9345.375, 14433.500, 14433.500
+async_queue_job_1024_local_copies / std_shared: 18550.844, 32979.062, 32979.062
+async_queue_job_1024_local_copies / own_local: 56327.438, 70523.938, 70523.938
+Output: "benchmarks/results/sanitizer_validation"
+Checksum: 161653504

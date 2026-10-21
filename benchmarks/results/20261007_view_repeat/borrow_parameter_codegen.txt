@@ -1,0 +1,26 @@
+Final optimized repeat binary: c07f5b682a13aae3ad9792d02e06387354b008ef4f841b5b7e0e78939dc3b2ec
+Command: objdump -d -C benchmarks/.build/ownership_bench
+GCC 14.2.0, -O3 -DNDEBUG -march=native; exact flags and source hashes in metadata.txt.
+The by-value raw-pointer and local_view parameter helpers contain matching instructions
+(apart from code addresses). Neither helper allocates or touches a reference count.
+This check does not prove that every inlined loop or surrounding ownership path generates identical code.
+
+000000000001ef20 <unsigned long bench::read_parameter<bench::asset const*>(bench::asset const*, unsigned long)>:
+   1ef20:	48 89 7c 24 f8       	mov    %rdi,-0x8(%rsp)
+   1ef25:	48 8d 44 24 f8       	lea    -0x8(%rsp),%rax
+   1ef2a:	48 8b 44 24 f8       	mov    -0x8(%rsp),%rax
+   1ef2f:	83 e6 07             	and    $0x7,%esi
+   1ef32:	48 8b 44 f0 10       	mov    0x10(%rax,%rsi,8),%rax
+   1ef37:	c3                   	ret
+   1ef38:	0f 1f 84 00 00 00 00 	nopl   0x0(%rax,%rax,1)
+   1ef3f:	00 
+
+000000000001ef40 <unsigned long bench::read_parameter<own::local_view<bench::asset const> >(own::local_view<bench::asset const>, unsigned long)>:
+   1ef40:	48 89 7c 24 f8       	mov    %rdi,-0x8(%rsp)
+   1ef45:	48 8d 44 24 f8       	lea    -0x8(%rsp),%rax
+   1ef4a:	48 8b 44 24 f8       	mov    -0x8(%rsp),%rax
+   1ef4f:	83 e6 07             	and    $0x7,%esi
+   1ef52:	48 8b 44 f0 10       	mov    0x10(%rax,%rsi,8),%rax
+   1ef57:	c3                   	ret
+   1ef58:	0f 1f 84 00 00 00 00 	nopl   0x0(%rax,%rax,1)
+   1ef5f:	00 
