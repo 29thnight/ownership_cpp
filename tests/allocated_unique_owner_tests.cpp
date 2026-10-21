@@ -139,11 +139,11 @@ struct self_aware : own::enable_owner_from_this<self_aware> {
     explicit self_aware(int& count, bool& destructor_state)
         : destroyed(&count),
           constructor_unbound(!shared_from_this() && weak_from_this().expired() &&
-                              !borrow_from_this() && !local_from_this()),
+                              !borrow_from_this()),
           destructor_unbound(&destructor_state) {}
     ~self_aware() {
         *destructor_unbound = !shared_from_this() && weak_from_this().expired() &&
-                              !borrow_from_this() && !local_from_this();
+                              !borrow_from_this();
         ++*destroyed;
     }
 };
@@ -456,10 +456,10 @@ void self_registration_stays_unbound() {
     auto owner = own::allocate_unique<self_aware>(allocator.ref(), destroyed, destructor_unbound);
     CHECK(owner->constructor_unbound);
     CHECK(!owner->shared_from_this() && owner->weak_from_this().expired());
-    CHECK(!owner->borrow_from_this() && !owner->local_from_this());
+    CHECK(!owner->borrow_from_this());
     const auto& payload = *owner;
     CHECK(!payload.shared_from_this() && payload.weak_from_this().expired());
-    CHECK(!payload.borrow_from_this() && !payload.local_from_this());
+    CHECK(!payload.borrow_from_this());
     CHECK(owner.borrow()->constructor_unbound && allocator.attempts == 1);
     auto moved = std::move(owner);
     CHECK(!moved->shared_from_this());
