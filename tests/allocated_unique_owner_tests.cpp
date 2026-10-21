@@ -153,41 +153,41 @@ template<class T> concept has_release = requires(T& value) { value.release(); };
 template<class T> concept has_use_count = requires(T& value) { value.use_count(); };
 template<class T> concept has_rvalue_borrow = requires(T&& value) { std::move(value).borrow(); };
 template<class T> concept has_raw_reset = requires(T& value, typename T::element_type* p) { value.reset(p); };
-static_assert(sizeof(own::allocated_unique_owner<int>) == 5 * sizeof(void*));
-static_assert(std::is_same_v<decltype(own::allocate_unique<int>({}, 1)), own::allocated_unique_owner<int>>);
-static_assert(!std::is_constructible_v<own::unique_owner<int>, own::allocated_unique_owner<int>>);
-static_assert(!std::is_constructible_v<own::allocated_unique_owner<int>, own::unique_owner<int>>);
-static_assert(!std::is_copy_constructible_v<own::allocated_unique_owner<int>>);
-static_assert(!std::is_copy_assignable_v<own::allocated_unique_owner<int>>);
-static_assert(std::is_nothrow_move_constructible_v<own::allocated_unique_owner<int>>);
-static_assert(std::is_nothrow_move_assignable_v<own::allocated_unique_owner<int>>);
-static_assert(std::is_nothrow_destructible_v<own::allocated_unique_owner<int>>);
-static_assert(std::is_nothrow_default_constructible_v<own::allocated_unique_owner<int>>);
-static_assert(std::is_nothrow_constructible_v<own::allocated_unique_owner<int>, std::nullptr_t>);
-static_assert(!std::is_constructible_v<own::allocated_unique_owner<int>, int*>);
-static_assert(!std::is_constructible_v<own::allocated_unique_owner<int>, int&>);
-static_assert(!std::is_convertible_v<own::allocated_unique_owner<int>, int*>);
-static_assert(!std::is_convertible_v<own::allocated_unique_owner<int>, bool>);
-static_assert(std::is_nothrow_constructible_v<own::allocated_unique_owner<right_base>, own::allocated_unique_owner<derived>&&>);
-static_assert(std::is_nothrow_assignable_v<own::allocated_unique_owner<right_base>&, own::allocated_unique_owner<derived>&&>);
-static_assert(std::is_convertible_v<own::allocated_unique_owner<int>, own::allocated_unique_owner<const int>>);
-static_assert(!std::is_constructible_v<own::allocated_unique_owner<int>, own::allocated_unique_owner<const int>&&>);
-static_assert(!std::is_constructible_v<own::allocated_unique_owner<derived>, own::allocated_unique_owner<right_base>&&>);
-static_assert(!std::is_constructible_v<own::allocated_unique_owner<int>, own::shared_owner<int>>);
-static_assert(!std::is_constructible_v<own::shared_owner<int>, own::allocated_unique_owner<int>>);
-static_assert(!std::is_constructible_v<own::local_owner<int>, own::allocated_unique_owner<int>>);
-static_assert(!std::is_constructible_v<own::weak_owner<int>, own::allocated_unique_owner<int>>);
-static_assert(!std::is_constructible_v<own::allocated_unique_owner<int>, own::local_view<int>>);
-static_assert(!has_get<own::allocated_unique_owner<int>> && !has_release<own::allocated_unique_owner<int>>);
-static_assert(!has_use_count<own::allocated_unique_owner<int>> && !has_raw_reset<own::allocated_unique_owner<int>>);
-static_assert(!has_rvalue_borrow<own::allocated_unique_owner<int>>);
-static_assert(!has_rvalue_borrow<const own::allocated_unique_owner<int>>);
-static_assert(std::is_same_v<own::allocated_unique_owner<int>::element_type, int>);
-static_assert(std::is_same_v<decltype(std::declval<const own::allocated_unique_owner<int>&>().borrow()), own::local_view<int>>);
-static_assert(std::is_same_v<decltype(std::declval<const own::allocated_unique_owner<const int>&>().borrow()), own::local_view<const int>>);
-static_assert(noexcept(std::declval<const own::allocated_unique_owner<int>&>().borrow()));
-static_assert(noexcept(std::declval<own::allocated_unique_owner<int>&>().reset()));
-static_assert(noexcept(std::declval<own::allocated_unique_owner<int>&>().swap(std::declval<own::allocated_unique_owner<int>&>())));
+static_assert(sizeof(own::unique_owner<int, own::allocator_ref>) == 5 * sizeof(void*));
+static_assert(std::is_same_v<decltype(own::allocate_unique<int>({}, 1)), own::unique_owner<int, own::allocator_ref>>);
+static_assert(!std::is_constructible_v<own::unique_owner<int>, own::unique_owner<int, own::allocator_ref>>);
+static_assert(!std::is_constructible_v<own::unique_owner<int, own::allocator_ref>, own::unique_owner<int>>);
+static_assert(!std::is_copy_constructible_v<own::unique_owner<int, own::allocator_ref>>);
+static_assert(!std::is_copy_assignable_v<own::unique_owner<int, own::allocator_ref>>);
+static_assert(std::is_nothrow_move_constructible_v<own::unique_owner<int, own::allocator_ref>>);
+static_assert(std::is_nothrow_move_assignable_v<own::unique_owner<int, own::allocator_ref>>);
+static_assert(std::is_nothrow_destructible_v<own::unique_owner<int, own::allocator_ref>>);
+static_assert(std::is_nothrow_default_constructible_v<own::unique_owner<int, own::allocator_ref>>);
+static_assert(std::is_nothrow_constructible_v<own::unique_owner<int, own::allocator_ref>, std::nullptr_t>);
+static_assert(!std::is_constructible_v<own::unique_owner<int, own::allocator_ref>, int*>);
+static_assert(!std::is_constructible_v<own::unique_owner<int, own::allocator_ref>, int&>);
+static_assert(!std::is_convertible_v<own::unique_owner<int, own::allocator_ref>, int*>);
+static_assert(!std::is_convertible_v<own::unique_owner<int, own::allocator_ref>, bool>);
+static_assert(std::is_nothrow_constructible_v<own::unique_owner<right_base, own::allocator_ref>, own::unique_owner<derived, own::allocator_ref>&&>);
+static_assert(std::is_nothrow_assignable_v<own::unique_owner<right_base, own::allocator_ref>&, own::unique_owner<derived, own::allocator_ref>&&>);
+static_assert(std::is_convertible_v<own::unique_owner<int, own::allocator_ref>, own::unique_owner<const int, own::allocator_ref>>);
+static_assert(!std::is_constructible_v<own::unique_owner<int, own::allocator_ref>, own::unique_owner<const int, own::allocator_ref>&&>);
+static_assert(!std::is_constructible_v<own::unique_owner<derived, own::allocator_ref>, own::unique_owner<right_base, own::allocator_ref>&&>);
+static_assert(!std::is_constructible_v<own::unique_owner<int, own::allocator_ref>, own::shared_owner<int>>);
+static_assert(!std::is_constructible_v<own::shared_owner<int>, own::unique_owner<int, own::allocator_ref>>);
+static_assert(!std::is_constructible_v<own::local_owner<int>, own::unique_owner<int, own::allocator_ref>>);
+static_assert(!std::is_constructible_v<own::weak_owner<int>, own::unique_owner<int, own::allocator_ref>>);
+static_assert(!std::is_constructible_v<own::unique_owner<int, own::allocator_ref>, own::local_view<int>>);
+static_assert(!has_get<own::unique_owner<int, own::allocator_ref>> && !has_release<own::unique_owner<int, own::allocator_ref>>);
+static_assert(!has_use_count<own::unique_owner<int, own::allocator_ref>> && !has_raw_reset<own::unique_owner<int, own::allocator_ref>>);
+static_assert(!has_rvalue_borrow<own::unique_owner<int, own::allocator_ref>>);
+static_assert(!has_rvalue_borrow<const own::unique_owner<int, own::allocator_ref>>);
+static_assert(std::is_same_v<own::unique_owner<int, own::allocator_ref>::element_type, int>);
+static_assert(std::is_same_v<decltype(std::declval<const own::unique_owner<int, own::allocator_ref>&>().borrow()), own::local_view<int>>);
+static_assert(std::is_same_v<decltype(std::declval<const own::unique_owner<const int, own::allocator_ref>&>().borrow()), own::local_view<const int>>);
+static_assert(noexcept(std::declval<const own::unique_owner<int, own::allocator_ref>&>().borrow()));
+static_assert(noexcept(std::declval<own::unique_owner<int, own::allocator_ref>&>().reset()));
+static_assert(noexcept(std::declval<own::unique_owner<int, own::allocator_ref>&>().swap(std::declval<own::unique_owner<int, own::allocator_ref>&>())));
 
 template<class F> void expect_bad_alloc(F&& body) {
     bool caught = false;
@@ -196,8 +196,8 @@ template<class F> void expect_bad_alloc(F&& body) {
 }
 
 void empty_handles() {
-    own::allocated_unique_owner<int> first;
-    own::allocated_unique_owner<int> second(nullptr);
+    own::unique_owner<int, own::allocator_ref> first;
+    own::unique_owner<int, own::allocator_ref> second(nullptr);
     CHECK(!first && !second && !first.borrow());
     first.reset();
     first.swap(second);
@@ -255,7 +255,7 @@ void move_assignment() {
     CHECK(!second && first->value == 2 && std::addressof(*first) == second_pointer);
     CHECK(first_destroyed == 1 && second_destroyed == 0);
     first_allocator.check_balanced();
-    own::allocated_unique_owner<tracked> empty;
+    own::unique_owner<tracked, own::allocator_ref> empty;
     first = std::move(empty);
     CHECK(!first && !empty && second_destroyed == 1);
     second_allocator.check_balanced();
@@ -282,7 +282,7 @@ void swapping_allocator_provenance() {
     auto second = own::allocate_unique<tracked>(second_allocator.ref(), second_destroyed, 22);
     first.swap(second);
     CHECK(first->value == 22 && second->value == 11);
-    own::allocated_unique_owner<tracked> empty;
+    own::unique_owner<tracked, own::allocator_ref> empty;
     using std::swap;
     swap(first, empty);
     CHECK(!first && empty->value == 22);
@@ -301,7 +301,7 @@ void adjusted_base_conversion() {
     auto* original = std::addressof(*source);
     auto* adjusted = static_cast<right_base*>(original);
     CHECK(static_cast<void*>(original) != static_cast<void*>(adjusted));
-    own::allocated_unique_owner<right_base> target = std::move(source);
+    own::unique_owner<right_base, own::allocator_ref> target = std::move(source);
     CHECK(!source && std::addressof(*target) == adjusted && target->right == 31);
     target.reset();
     CHECK(base_destroyed == 1 && derived_destroyed == 1);
@@ -321,7 +321,7 @@ void converting_move_assignment() {
     CHECK(!source && std::addressof(*target) == adjusted && target_destroyed == 1);
     CHECK(source_base == 0 && source_derived == 0);
     target_allocator.check_balanced();
-    own::allocated_unique_owner<derived> empty;
+    own::unique_owner<derived, own::allocator_ref> empty;
     target = std::move(empty);
     CHECK(!target && source_base == 1 && source_derived == 1);
     source_allocator.check_balanced();
@@ -333,8 +333,8 @@ void virtual_base_conversion() {
     auto source = own::allocate_unique<virtual_derived>(allocator.ref(), base_destroyed, derived_destroyed);
     auto* original = std::addressof(*source);
     auto* adjusted = static_cast<virtual_base*>(original);
-    own::allocated_unique_owner<virtual_left> middle = std::move(source);
-    own::allocated_unique_owner<const virtual_base> target = std::move(middle);
+    own::unique_owner<virtual_left, own::allocator_ref> middle = std::move(source);
+    own::unique_owner<const virtual_base, own::allocator_ref> target = std::move(middle);
     CHECK(!source && !middle && std::addressof(*target) == adjusted && target->value == 91);
     target.reset();
     CHECK(base_destroyed == 1 && derived_destroyed == 1);
@@ -342,8 +342,8 @@ void virtual_base_conversion() {
     CHECK(allocator.last_deallocation.bytes == sizeof(virtual_derived));
     CHECK(allocator.last_deallocation.alignment == alignof(virtual_derived));
     allocator.check_balanced();
-    own::allocated_unique_owner<virtual_derived> empty;
-    own::allocated_unique_owner<const virtual_base> empty_base = std::move(empty);
+    own::unique_owner<virtual_derived, own::allocator_ref> empty;
+    own::unique_owner<const virtual_base, own::allocator_ref> empty_base = std::move(empty);
     CHECK(!empty && !empty_base);
 }
 
@@ -351,7 +351,7 @@ void const_factories_and_conversion() {
     counting_allocator allocator;
     int destroyed = 0;
     auto source = own::allocate_unique<tracked>(allocator.ref(), destroyed, 81);
-    own::allocated_unique_owner<const tracked> target = std::move(source);
+    own::unique_owner<const tracked, own::allocator_ref> target = std::move(source);
     CHECK(!source && target->value == 81);
     auto constant = own::allocate_unique<const tracked>(allocator.ref(), destroyed, 82);
     CHECK(constant->value == 82);
@@ -385,7 +385,7 @@ void over_aligned_allocation() {
         CHECK(reinterpret_cast<std::uintptr_t>(std::addressof(*owner)) % alignof(aligned_tracked) == 0);
         CHECK(allocator.last_allocation.bytes == sizeof(aligned_tracked));
         CHECK(allocator.last_allocation.alignment == alignof(aligned_tracked));
-        own::allocated_unique_owner<tracked> base = std::move(owner);
+        own::unique_owner<tracked, own::allocator_ref> base = std::move(owner);
         CHECK(base->value == 73);
     }
     CHECK(destroyed == 1);
@@ -474,10 +474,10 @@ void self_registration_stays_unbound() {
 
 void reset_is_empty_during_destruction() {
     struct reentrant {
-        own::allocated_unique_owner<reentrant>* owner;
+        own::unique_owner<reentrant, own::allocator_ref>* owner;
         bool* saw_empty;
         int* destroyed;
-        reentrant(own::allocated_unique_owner<reentrant>& slot, bool& empty, int& count)
+        reentrant(own::unique_owner<reentrant, own::allocator_ref>& slot, bool& empty, int& count)
             : owner(&slot), saw_empty(&empty), destroyed(&count) {}
         ~reentrant() {
             *saw_empty = !*owner;
@@ -485,7 +485,7 @@ void reset_is_empty_during_destruction() {
             ++*destroyed;
         }
     };
-    own::allocated_unique_owner<reentrant> owner;
+    own::unique_owner<reentrant, own::allocator_ref> owner;
     bool saw_empty = false;
     int destroyed = 0;
     owner = own::allocate_unique<reentrant>({}, owner, saw_empty, destroyed);
@@ -495,7 +495,7 @@ void reset_is_empty_during_destruction() {
 
 void move_from_member_of_replaced_payload() {
     struct node {
-        own::allocated_unique_owner<node> next;
+        own::unique_owner<node, own::allocator_ref> next;
         int* destroyed;
         int value;
         node(int& count, int number) : destroyed(&count), value(number) {}
@@ -517,11 +517,11 @@ void move_from_member_of_replaced_payload() {
 
 void reset_destructor_installs_replacement() {
     struct reentrant {
-        own::allocated_unique_owner<reentrant>* target;
-        own::allocated_unique_owner<reentrant>* replacement;
+        own::unique_owner<reentrant, own::allocator_ref>* target;
+        own::unique_owner<reentrant, own::allocator_ref>* replacement;
         int* destroyed;
         bool* saw_empty;
-        reentrant(own::allocated_unique_owner<reentrant>* slot, own::allocated_unique_owner<reentrant>* incoming,
+        reentrant(own::unique_owner<reentrant, own::allocator_ref>* slot, own::unique_owner<reentrant, own::allocator_ref>* incoming,
                   int& count, bool& empty)
             : target(slot), replacement(incoming), destroyed(&count), saw_empty(&empty) {}
         ~reentrant() {
@@ -533,7 +533,7 @@ void reset_destructor_installs_replacement() {
         }
     };
     counting_allocator allocator;
-    own::allocated_unique_owner<reentrant> owner, replacement;
+    own::unique_owner<reentrant, own::allocator_ref> owner, replacement;
     int destroyed = 0;
     bool saw_empty = false;
     replacement = own::allocate_unique<reentrant>(allocator.ref(), nullptr, nullptr, destroyed, saw_empty);
@@ -573,7 +573,7 @@ void synchronized_thread_transfer() {
 // containing its non-owning allocator context. Tests inspect only the public
 // empty state. Runtime tools on this ABI cannot prove that inactive invalid
 // pointer values are never copied; that additionally requires invariant review.
-void leave_empty_after_context_dies(own::allocated_unique_owner<tracked>& empty,
+void leave_empty_after_context_dies(own::unique_owner<tracked, own::allocator_ref>& empty,
                                    int& destroyed, bool move_first) {
     auto context = std::make_unique<counting_allocator>();
     empty = own::allocate_unique<tracked>(context->ref(), destroyed, 61);
@@ -591,7 +591,7 @@ void leave_empty_after_context_dies(own::allocated_unique_owner<tracked>& empty,
 
 void expired_context_empty_operations(bool move_first) {
     int destroyed = 0;
-    own::allocated_unique_owner<tracked> stale;
+    own::unique_owner<tracked, own::allocator_ref> stale;
     leave_empty_after_context_dies(stale, destroyed, move_first);
     CHECK(destroyed == 1 && !stale && !stale.borrow());
     stale.reset();
@@ -604,7 +604,7 @@ void expired_context_empty_operations(bool move_first) {
     stale = std::move(alias);
     stale.swap(stale);
     moved = std::move(stale);
-    own::allocated_unique_owner<const tracked> constant = std::move(stale);
+    own::unique_owner<const tracked, own::allocator_ref> constant = std::move(stale);
     constant = std::move(moved);
     CHECK(!stale && !moved && !constant && !constant.borrow());
     constant.reset();
@@ -613,7 +613,7 @@ void expired_context_empty_operations(bool move_first) {
 
 void expired_context_empty_and_live_operations() {
     int expired_destroyed = 0, live_destroyed = 0;
-    own::allocated_unique_owner<tracked> stale;
+    own::unique_owner<tracked, own::allocator_ref> stale;
     leave_empty_after_context_dies(stale, expired_destroyed, true);
     counting_allocator context;
     auto live = own::allocate_unique<tracked>(context.ref(), live_destroyed, 77);
@@ -643,7 +643,7 @@ void expired_context_empty_and_live_operations() {
 }
 
 void expired_context_empty_virtual_base_conversions() {
-    own::allocated_unique_owner<virtual_derived> stale;
+    own::unique_owner<virtual_derived, own::allocator_ref> stale;
     int base_destroyed = 0, derived_destroyed = 0;
     {
         auto context = std::make_unique<counting_allocator>();
@@ -655,9 +655,9 @@ void expired_context_empty_virtual_base_conversions() {
         context.reset();
     }
     CHECK(base_destroyed == 1 && derived_destroyed == 1);
-    own::allocated_unique_owner<const virtual_base> direct = std::move(stale);
-    own::allocated_unique_owner<virtual_left> middle = std::move(stale);
-    own::allocated_unique_owner<const virtual_base> chained = std::move(middle);
+    own::unique_owner<const virtual_base, own::allocator_ref> direct = std::move(stale);
+    own::unique_owner<virtual_left, own::allocator_ref> middle = std::move(stale);
+    own::unique_owner<const virtual_base, own::allocator_ref> chained = std::move(middle);
     CHECK(!stale && !direct && !middle && !chained);
     CHECK(!stale.borrow() && !direct.borrow() && !middle.borrow() && !chained.borrow());
     counting_allocator live_context;
@@ -676,7 +676,7 @@ void expired_context_empty_virtual_base_conversions() {
 void vector_relocation_and_scope_exit() {
     int destroyed = 0;
     {
-        std::vector<own::allocated_unique_owner<tracked>> values;
+        std::vector<own::unique_owner<tracked, own::allocator_ref>> values;
         for (int i = 0; i != 128; ++i) values.push_back(own::allocate_unique<tracked>({}, destroyed, i));
         CHECK(destroyed == 0);
         for (int i = 0; i != 128; ++i) CHECK(values[static_cast<std::size_t>(i)]->value == i);

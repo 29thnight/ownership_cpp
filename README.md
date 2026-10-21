@@ -99,7 +99,7 @@ make it an error. Other compilers ignore the annotations
 ## Exclusive ownership
 
 ```cpp
-auto object = own::make_unique<asset>(3);
+auto object = own::make_unique<asset>(3);           // or: own::unique_owner<asset> object(std::in_place, 3);
 auto next_owner = std::move(object);  // object becomes empty; payload stays put
 auto view = next_owner.borrow();
 next_owner.reset();                  // destroys payload; do not use view afterward
@@ -107,10 +107,15 @@ next_owner.reset();                  // destroys payload; do not use view afterw
 
 The default `unique_owner<T>` contains only `T*`: **8 bytes on the tested 64-bit
 ABI**, matching default `std::unique_ptr<T>`. It has no reference count, shared
-control block, allocator context or runtime deleter. `make_unique<T>(args...)`
-uses ordinary `new T(args...)`; destruction uses typed `delete`. Class-specific
-allocation/deallocation functions and constructor-failure cleanup follow C++
-new/delete rules together, rather than mixing allocation schemes.
+control block, allocator context or runtime deleter. `make_unique<T>(args...)` and
+the `std::in_place` constructor use ordinary `new T(args...)`; destruction uses
+typed `delete`. Class-specific allocation/deallocation functions and
+constructor-failure cleanup follow C++ new/delete rules together, rather than
+mixing allocation schemes.
+
+The constructor needs `std::in_place` (or an allocator, below). A bare argument
+list such as `unique_owner<int> owner(value)` stays a compile error, because it
+would read as adopting `value` rather than copying it into a new object.
 
 Moves, `reset`, `swap`, `bool`, `*`, `->`, `borrow` and the warned `unsafe_get` are
 supported. Safe const qualification is allowed. An owning derived-to-base move
@@ -120,31 +125,59 @@ owner and convert its borrowed view to access that base instead. The payload typ
 must be complete wherever default destruction/reset is instantiated, as with
 ordinary standard unique ownership.
 
-### Runtime allocator is explicit opt-in
+### Custom allocators: the allocator is a type argument
 
-`allocate_unique<T>(allocator_ref, args...)` returns a different type,
-`allocated_unique_owner<T>`. It allocates the object through the byte allocator,
-constructs with global placement new, then uses the original concrete destructor
-and allocator callback. It does not invoke class-specific storage allocation or
-deallocation. Allocation failure/null and constructor unwinding follow the
-`allocator_ref` contract.
+`unique_owner<T, Alloc>` takes the allocator as its second template argument and
+the allocator object as its first constructor argument:
 
-That opt-in owner stores the access pointer, original allocation address,
-allocator context, deallocation function and concrete destruction function:
-**40 bytes on this ABI**, without a second heap allocation or reference count.
-Its preserved concrete cleanup also allows safe non-virtual-base ownership
-conversion. This extra capability and cost do not burden ordinary `make_unique`.
-The allocator context is borrowed and must remain valid through disposal; its
-`noexcept` deallocation callback must work on the eventual destruction thread.
+```cpp
+struct frame_pool_ref                        // any type with these two members
+{
+    frame_pool* pool;
+    void* allocate(std::size_t size, std::size_t alignment) { return pool->allocate(size, alignment); }
+    void deallocate(void* p, std::size_t size, std::size_t alignment) noexcept { pool->free(p, size, alignment); }
+};
 
-Neither owner supports copying, `release`, raw/reference adoption, raw reset,
-arbitrary user deleters, or conversion to the other owner kind/shared/weak
-ownership. Neither provides a retirement hook. They may move between synchronized
-threads, but concurrent mutation of the same handle is unsafe. Both retain the
-same pointer-sized non-owning `borrowed` view access model.
+own::unique_owner<mesh, frame_pool_ref> mesh_owner(frame_pool_ref{&pool}, vertices);
+auto same_thing = own::allocate_unique<mesh>(frame_pool_ref{&pool}, vertices);
+```
+
+| Second argument | Size (64-bit) | Constructed with | Base conversion |
+| --- | ---: | --- | --- |
+| omitted (`own::new_delete`) | 8 B | `std::in_place, args...` | virtual destructor required |
+| empty allocator type | 8 B | `std::in_place, args...` or `alloc, args...` | none (const only) |
+| allocator with state, e.g. a pool pointer | 8 B + its size | `alloc, args...` | none (const only) |
+| `own::allocator_ref` (runtime, per object) | 40 B | `ref, args...` or `std::in_place, args...` | any public base |
+
+- The owner keeps a copy of the allocator, moves it with the object, and on
+  release passes back exactly `sizeof(T)`/`alignof(T)`. That is also why a user
+  allocator's owner converts only to `const T`: through a base it would report
+  the wrong size. `allocate` may return null (reported as `std::bad_alloc`) or
+  throw; a throwing constructor's storage goes back to the same allocator
+- `allocate` and `deallocate` are a concept, `own::unique_allocator`, not
+  `std::allocator`; the allocator's copies must be `noexcept`, and `deallocate`
+  must be `noexcept` and work on whichever thread releases the owner
+- Owners with different allocators are different types, like containers with
+  different allocators, and never convert into one another. A function that
+  accepts owners from any pool can take `unique_owner<T, own::allocator_ref>`
+- `own::allocator_ref` chooses the allocator per object at run time. Its owner
+  stores the access pointer, original allocation, allocator context and
+  callback, and the concrete destructor (**40 bytes**, no second allocation), so
+  base conversions are valid without a virtual destructor
+  (`allocate_unique<T>(allocator_ref, args...)` returns this type). It was
+  called `allocated_unique_owner<T>`; that name remains as a deprecated alias
+- No allocator form invokes class-specific `operator new`/`delete`; the
+  allocator provides the storage and global placement new constructs in it
+
+No exclusive owner supports copying, `release`, raw/reference adoption, raw reset,
+arbitrary user deleters, or conversion to another allocator, to shared/weak
+ownership, or to a local owner. None provides a retirement hook. They may move
+between synchronized threads, but concurrent mutation of the same handle is
+unsafe. All share the pointer-sized non-owning `borrowed` view access model.
 
 [Exclusive-owner measurements](docs/unique_results.md) compare the lean default,
-its rejected 40-byte prototype, both standard baselines, and the opt-in type under
+its rejected 40-byte prototype, both standard baselines, and the opt-in
+`allocator_ref` type (then `allocated_unique_owner`) under
 matched lifetime contracts. Results distinguish forced-observable moves from
 optimized container/frame/job use; the former are not whole-engine timings.
 That 23,808-sample study did **not** establish the requested ~1% goal: the default
@@ -196,7 +229,7 @@ A view extracted from a temporary successful weak lock does not keep that lock's
 ownership after the full expression ends; hold the locked owner throughout use.
 
 Unique factories do not register this mixin or create a shared control block.
-Under either `unique_owner` or `allocated_unique_owner`, its shared/weak/from-this
+Under any `unique_owner`, whatever its allocator, its shared/weak/from-this
 view methods remain empty; borrow from the owning handle for access. There is no `unique_from_this()` because it
 would create a second exclusive owner, and no automatic unique-to-shared promotion.
 
@@ -265,7 +298,7 @@ with the counts; declare such a hot type `alignas(64)` to give it its own line
 
 Factories: `make_unique`, `allocate_unique`, `make_shared`, `make_local`,
 `allocate_shared`, `allocate_local`. Default `make_unique` uses typed new/delete;
-`allocate_unique` returns the separate allocator-aware owner.
+`allocate_unique` returns `unique_owner<T, Alloc>` for the allocator it is given.
 An `allocator_ref` supplies non-owning byte-allocation callbacks with exact
 size/alignment matching. Null allocations throw `std::bad_alloc`; over-aligned
 payloads and constructor failure are supported. Keep allocator contexts alive
@@ -295,9 +328,10 @@ names[own::identity(exact)] = "hero";            // no raw pointer needed for a 
   `local_owner` like the standard pointer casts. A failed dynamic cast returns an
   empty owner and leaves an rvalue source untouched: you never lose ownership by
   asking. Const is never cast away
-- `unique_owner` and `allocated_unique_owner` accept `dynamic_owner_cast` from an
-  rvalue only. For `unique_owner` the target must have a virtual destructor,
-  because it deletes through that type
+- `unique_owner<T>` and `unique_owner<T, own::allocator_ref>` accept
+  `dynamic_owner_cast` from an rvalue only. For `unique_owner<T>` the target must
+  have a virtual destructor, because it deletes through that type; an owner with
+  a user allocator never holds a derived object through a base, so it has none
 - `own::identity(owner)` returns an `object_id`: comparable, ordered and hashable
   (`std::hash` is provided), but not dereferenceable. All shared, weak and local
   handles of one object, and every cast of it, share one key; a weak key survives

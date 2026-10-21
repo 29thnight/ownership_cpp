@@ -8,7 +8,7 @@ Tested header SHA-256:
 `source-sha256.txt` identifies the header, runner, and all test sources.
 Every recorded full run below began after that header was frozen. These
 records validate the pointer-only default `unique_owner<T>` and separate
-`allocated_unique_owner<T>`, then rerun every existing regression test.
+`unique_owner<T, allocator_ref>`, then rerun every existing regression test.
 Earlier published records elsewhere under `tests/results/` are unchanged.
 The unpublished erased-default prototype is a separate frozen baseline and
 is not the implementation validated by these records.

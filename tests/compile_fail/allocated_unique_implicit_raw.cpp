@@ -1,4 +1,4 @@
-// expect: (cannot convert '(own::)?allocated_unique_owner<int>' to 'int\*'|no viable conversion from '(own::)?allocated_unique_owner<int>' to 'int \*')
+// expect: (cannot convert '(own::)?unique_owner<int, ?(\[\.\.\.\]|(own::)?allocator_ref)>' to 'int\*'|no viable conversion from '(own::)?unique_owner<int, ?(\[\.\.\.\]|(own::)?allocator_ref)>' to 'int \*')
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

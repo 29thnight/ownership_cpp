@@ -48,8 +48,8 @@ template<class To, class Owner>
 concept dynamic_castable = requires(Owner&& owner) { own::dynamic_owner_cast<To>(std::forward<Owner>(owner)); };
 static_assert(dynamic_castable<derived, own::unique_owner<base>>);
 static_assert(!dynamic_castable<derived, own::unique_owner<base>&>);
-static_assert(dynamic_castable<derived, own::allocated_unique_owner<base>>);
-static_assert(!dynamic_castable<derived, own::allocated_unique_owner<base>&>);
+static_assert(dynamic_castable<derived, own::unique_owner<base, own::allocator_ref>>);
+static_assert(!dynamic_castable<derived, own::unique_owner<base, own::allocator_ref>&>);
 // Const is never removed.
 template<class To, class Owner>
 concept static_castable = requires(Owner&& owner) { own::static_owner_cast<To>(std::forward<Owner>(owner)); };
@@ -133,13 +133,13 @@ void allocated_unique_dynamic_cast_keeps_disposer() {
     int destroyed = 0;
     counting_allocator allocator;
     {
-        own::allocated_unique_owner<other_base> as_other = own::allocate_unique<derived>(allocator.ref(), destroyed);
-        auto failed = own::dynamic_owner_cast<unrelated>(own::allocated_unique_owner<other_base>(std::move(as_other)));
+        own::unique_owner<other_base, own::allocator_ref> as_other = own::allocate_unique<derived>(allocator.ref(), destroyed);
+        auto failed = own::dynamic_owner_cast<unrelated>(own::unique_owner<other_base, own::allocator_ref>(std::move(as_other)));
         CHECK(!failed);
         CHECK(destroyed == 1 && allocator.live == 0); // the temporary source was destroyed with its object
     }
     {
-        own::allocated_unique_owner<other_base> as_other = own::allocate_unique<derived>(allocator.ref(), destroyed);
+        own::unique_owner<other_base, own::allocator_ref> as_other = own::allocate_unique<derived>(allocator.ref(), destroyed);
         auto as_derived = own::dynamic_owner_cast<derived>(std::move(as_other));
         CHECK(as_derived && !as_other && allocator.live == 1);
     }
@@ -184,7 +184,7 @@ void exclusive_identity() {
     {
         auto owner = own::allocate_unique<derived>(allocator.ref(), destroyed);
         const auto id = own::identity(owner);
-        own::allocated_unique_owner<other_base> as_other = std::move(owner);
+        own::unique_owner<other_base, own::allocator_ref> as_other = std::move(owner);
         CHECK(id && own::identity(as_other) == id);
     }
     CHECK(destroyed == 2 && allocator.live == 0);

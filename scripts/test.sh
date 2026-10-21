@@ -78,6 +78,8 @@ run_mode() {
     "$output/unique_default_allocation_tests"
     "$cxx" "${flags[@]}" "$root/tests/api_extensions_tests.cpp" -o "$output/api_extensions_tests"
     "$output/api_extensions_tests"
+    "$cxx" "${flags[@]}" "$root/tests/unique_allocator_tests.cpp" -o "$output/unique_allocator_tests"
+    "$output/unique_allocator_tests"
     "$cxx" "${flags[@]}" "$root/tests/layout_tests.cpp" -o "$output/layout_tests"
     "$output/layout_tests"
 

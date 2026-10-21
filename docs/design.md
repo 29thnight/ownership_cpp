@@ -107,15 +107,50 @@ and declarations of owner-returning functions remain possible; an enclosing PIMP
 class should define its destructor where its payload is complete. The default
 does not retain a destruction callback merely to permit incomplete-type cleanup.
 
-## Opt-in runtime allocator ownership
+## Allocators as a type argument
 
-`allocate_unique<T>(allocator_ref, args...)` returns
-`allocated_unique_owner<T>`, not `unique_owner<T>`. It retains the original
-concrete type's disposal callback, original allocation address, adjusted access
-pointer, allocator context and deallocator. These five data/function-pointer
-fields occupy 40 bytes on the tested ABI. The object itself is one allocation
-of exactly `sizeof(T)`/`alignof(T)` through the allocator; no metadata/control block
-is separately allocated and no reference count exists.
+`unique_owner<T, Alloc>` names its allocation in the type. The default,
+`own::new_delete`, is the pointer-only owner above. Any other allocator is
+passed as the first constructor argument (`unique_owner<T, Alloc>(alloc, args...)`)
+or to `allocate_unique<T>(alloc, args...)`; empty allocators also accept
+`std::in_place`. Constructors always take `std::in_place` or an allocator first,
+so no argument list can be mistaken for adopting an existing object.
+
+### User allocator types
+
+A type with `void* allocate(size_t size, size_t alignment)` and a `noexcept`
+`deallocate(void*, size_t size, size_t alignment)`, whose copies and moves are
+`noexcept`, satisfies `own::unique_allocator`. The owner stores the allocator
+object with `[[no_unique_address]]` (`[[msvc::no_unique_address]]` on MSVC)
+before the pointer, so an empty allocator keeps the owner at one pointer and a
+handle-like allocator adds only its own size. Moves carry the allocator with the
+object; swap exchanges both; move assignment releases the old object to the old
+allocator before adopting the new object and its allocator.
+
+The object is one allocation of exactly `sizeof(T)`/`alignof(T)`, constructed with
+global placement new. Release destroys it and passes the same size and alignment
+back. Because only that size is known, the owner converts only to a
+differently cv-qualified `T`: through a base, the allocator would receive the
+base's size for a derived object. A null `allocate` result throws
+`std::bad_alloc`; a throwing constructor returns its storage before rethrowing.
+Owners with different allocator types are distinct types and do not convert.
+
+Choosing a type argument rather than a runtime field keeps the default at one
+pointer and lets the compiler inline a pool's calls, at the price that the
+allocator becomes part of every signature that names the owner. Code that must
+accept owners from several pools uses `allocator_ref`, below, or takes a
+`borrowed<T>` when it needs access rather than ownership.
+
+### Runtime allocator: `unique_owner<T, allocator_ref>`
+
+`allocate_unique<T>(allocator_ref, args...)`, or the constructor with an
+`allocator_ref`, returns `unique_owner<T, allocator_ref>` (formerly
+`allocated_unique_owner<T>`, still available as a deprecated alias). It retains
+the original concrete type's disposal callback, original allocation address,
+adjusted access pointer, allocator context and deallocator. These five
+data/function-pointer fields occupy 40 bytes on the tested ABI. The object itself
+is one allocation of exactly `sizeof(T)`/`alignof(T)` through the allocator; no
+metadata/control block is separately allocated and no reference count exists.
 
 This path constructs through `::new (storage) T(...)`, bypassing class-specific
 storage allocation. It explicitly destroys the concrete payload and calls the
@@ -133,19 +168,19 @@ cleanup, makes ownership observably empty before invoking user code, then perfor
 exactly one destruction/deallocation without touching the handle afterward. Empty handles can be used with incomplete payload types because populated
 cleanup was established by a factory where the concrete type was complete.
 
-The default and allocated types do not implicitly convert to each other. This
-prevents silently losing a deallocation contract or putting allocator state back
-into the pointer-sized default. Use borrowed access when a consumer only needs
+Owners with different allocator arguments do not implicitly convert to each
+other. This prevents silently losing a deallocation contract or putting allocator
+state back into the pointer-sized default. Use borrowed access when a consumer only needs
 access rather than owning a particular allocation policy.
 
-Neither form exposes copying, `release`, raw/reference adoption, pointer reset,
+No form exposes copying, `release`, raw/reference adoption, pointer reset,
 public aliasing, arbitrary deleters, arrays, fancy pointers, allocator traits,
-retirement hooks or automatic shared promotion. Both may move between synchronized
+retirement hooks or automatic shared promotion. All may move between synchronized
 threads; mutation of one handle concurrently remains invalid. A view survives an
 ownership move only if the receiving owner continues to retain the same payload.
 Reset, replacement and final destruction can invalidate it.
 
-The `enable_owner_from_this` mixin stays unbound under both unique factories;
+The `enable_owner_from_this` mixin stays unbound under every unique owner;
 even its from-this view helpers return empty. Borrow from the owning handle.
 Creating a second unique owner from `this` would violate exclusivity.
 
@@ -467,11 +502,12 @@ source untouched, so the caller never loses ownership by asking. Const is never
 removed. There is no general aliasing constructor: the result always points at
 the same object, adjusted only by a language cast.
 
-Exclusive owners take only `dynamic_owner_cast`, from an rvalue. `unique_owner`
+Exclusive owners take only `dynamic_owner_cast`, from an rvalue. `unique_owner<T>`
 deletes through its own type, so the target must have a virtual destructor (or
-be the same type); otherwise the cast does not compile. `allocated_unique_owner`
-keeps its concrete disposer and allocation, so any successful cast destroys
-correctly.
+be the same type); otherwise the cast does not compile.
+`unique_owner<T, allocator_ref>` keeps its concrete disposer and allocation, so
+any successful cast destroys correctly. An owner with a user allocator type can
+never hold a derived object through a base, so it offers no downcast.
 
 Owners still have no `==`, ordering or hash. `own::identity(owner)` returns an
 `own::object_id`: a comparable, hashable key that cannot be dereferenced.

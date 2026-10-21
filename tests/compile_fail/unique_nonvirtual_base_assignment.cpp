@@ -1,4 +1,4 @@
-// expect: (no match for 'operator=' \(operand types are '(own::)?unique_owner<base>'|no viable overloaded '=')
+// expect: (no match for 'operator=' \(operand types are '(own::)?unique_owner<base(, ?(\(default\) )?(\[\.\.\.\]|(own::)?new_delete))?>'|no viable overloaded '=')
 #include <own/ownership.hpp>
 #include <utility>
 

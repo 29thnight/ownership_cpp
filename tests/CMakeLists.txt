@@ -41,6 +41,7 @@ own_test(unique_owner_tests)
 own_test(allocated_unique_owner_tests)
 own_test(unique_default_allocation_tests)
 own_test(api_extensions_tests)
+own_test(unique_allocator_tests)
 own_test(layout_tests)
 # Death tests for the debug thread checks; they use POSIX fork and report SKIP
 # elsewhere. NDEBUG is undefined for this target so that Release builds still
