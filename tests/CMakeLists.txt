@@ -151,3 +151,13 @@ endforeach()
 own_test(unique_unsafe_get_warning_0 SOURCES unique_unsafe_get_warning.cpp DEFINES OWN_ENABLE_UNSAFE_GET_WARNING=0)
 own_test(allocated_unique_unsafe_get_warning_0 SOURCES allocated_unique_unsafe_get_warning.cpp
     DEFINES OWN_ENABLE_UNSAFE_GET_WARNING=0)
+
+# On MSVC-style toolchains, settings that differ between translation units of
+# one binary must fail to link (#pragma detect_mismatch in the header).
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    add_test(NAME detect_mismatch
+        COMMAND ${CMAKE_COMMAND} -DCOMPILER=${CMAKE_CXX_COMPILER} -DINCLUDE=${PROJECT_SOURCE_DIR}/include
+            -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/detect_mismatch
+            -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/detect_mismatch
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/detect_mismatch.cmake)
+endif()
