@@ -4,6 +4,7 @@
 // Copyright (c) 2026 29thnight. Licensed under the MIT License; see LICENSE.
 #include <atomic>
 #include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -745,26 +746,70 @@ namespace own
     // overloads keep working; "local" now names only thread confinement.
     template<class T> using local_view = borrowed<T>;
 
-    // A byte allocator for unique_owner<T, Alloc>: the same contract as
-    // allocator_ref (exact size/alignment on release, null or throw on
-    // failure, a noexcept deallocate usable on the releasing thread), as a
-    // type. An empty allocator adds no bytes; a stateful one (for example a
-    // handle holding a pool pointer) is stored in each owner.
+    // The allocator interface of unique_owner<T, Alloc>. An allocator derives
+    // from it publicly, naming itself (CRTP), and implements two members:
+    //
+    //   struct frame_pool_ref : own::allocator_interface<frame_pool_ref>
+    //   {
+    //       frame_pool* pool;
+    //       void* do_allocate(std::size_t size, std::size_t alignment);
+    //       void do_deallocate(void* pointer, std::size_t size, std::size_t alignment) noexcept;
+    //   };
+    //
+    // Owners call only the interface's allocate/deallocate, which forward to
+    // them. The contract matches allocator_ref: deallocate receives exactly the
+    // size and alignment that were allocated and runs on the releasing thread;
+    // do_allocate may return null (reported as std::bad_alloc) or throw.
+    //
+    // The interface is static, not virtual: it adds no vtable pointer, so an
+    // allocator with no data members stays empty and its owner one pointer.
+    template<class Derived>
+    class allocator_interface
+    {
+    public:
+        [[nodiscard]] void* allocate(std::size_t size, std::size_t alignment)
+        {
+            void* storage = self().do_allocate(size, alignment);
+            if (!storage) { throw std::bad_alloc(); }
+            return storage;
+        }
+        void deallocate(void* storage, std::size_t size, std::size_t alignment) noexcept
+        {
+            self().do_deallocate(storage, size, alignment);
+        }
+
+        // Special members stay public and trivial so an allocator can be a
+        // plain aggregate: `frame_pool_ref{.pool = &pool}`.
+
+    private:
+        Derived& self() noexcept
+        {
+            static_assert(std::derived_from<Derived, allocator_interface>,
+                          "allocator_interface<Derived> must be a public base of Derived");
+            return static_cast<Derived&>(*this);
+        }
+    };
+
+    // What unique_owner<T, Alloc> requires of Alloc, checked at the point of use:
+    //  - a public, unambiguous allocator_interface<Alloc> base
+    //  - void* do_allocate(size_t, size_t) and a noexcept
+    //    do_deallocate(void*, size_t, size_t), callable by the interface
+    //  - noexcept copy, move and destruction (owners copy it as they move)
     template<class A>
     concept unique_allocator =
-        std::is_object_v<A> && !std::is_same_v<A, new_delete> && !std::is_same_v<A, allocator_ref> &&
+        std::is_class_v<A> && std::derived_from<A, allocator_interface<A>> &&
         std::is_nothrow_copy_constructible_v<A> && std::is_nothrow_move_constructible_v<A> &&
         std::is_nothrow_copy_assignable_v<A> && std::is_nothrow_move_assignable_v<A> &&
         std::is_nothrow_destructible_v<A> &&
         requires(A& allocator, void* pointer, std::size_t bytes) {
-            { allocator.allocate(bytes, bytes) } -> std::same_as<void*>;
-            { allocator.deallocate(pointer, bytes, bytes) } noexcept;
+            { allocator.do_allocate(bytes, bytes) } -> std::same_as<void*>;
+            { allocator.do_deallocate(pointer, bytes, bytes) } noexcept;
         };
 
     // Exclusive ownership. The allocation is part of the type:
     //  - unique_owner<T> (new_delete): one pointer. Typed new/delete supply
     //    destruction and allocation lookup without runtime metadata.
-    //  - unique_owner<T, Alloc> for a unique_allocator: the pointer plus the
+    //  - unique_owner<T, Alloc> for an allocator_interface implementation: the pointer plus the
     //    allocator object (nothing more when Alloc is empty). Releases exactly
     //    sizeof(T)/alignof(T), so it converts only to a differently
     //    cv-qualified T, never to a base.
@@ -775,8 +820,9 @@ namespace own
     {
         static_assert(std::is_object_v<T> && !std::is_array_v<T>);
         static_assert(std::is_same_v<Alloc, new_delete> || unique_allocator<Alloc>,
-                      "unique_owner's second argument must be own::new_delete, own::allocator_ref, or a type "
-                      "with void* allocate(size_t, size_t) and a noexcept deallocate(void*, size_t, size_t)");
+                      "unique_owner's second argument must be own::new_delete, own::allocator_ref, or an "
+                      "allocator deriving from own::allocator_interface<Alloc> with void* do_allocate(size_t, "
+                      "size_t) and a noexcept do_deallocate(void*, size_t, size_t)");
         static constexpr bool default_allocation = std::is_same_v<Alloc, new_delete>;
     public:
         using element_type = T;
@@ -865,8 +911,8 @@ namespace own
             }
             else
             {
+                // Through the interface: a null result is already std::bad_alloc.
                 void* storage = allocator.allocate(sizeof(T), alignof(T));
-                if (!storage) { throw std::bad_alloc(); }
                 try
                 {
                     return ::new (storage) T(std::forward<Args>(args)...);

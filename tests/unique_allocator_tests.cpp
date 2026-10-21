@@ -24,15 +24,17 @@ struct pool_state {
 };
 
 // Stateful allocator: one pointer, stored in each owner.
-struct pool_handle {
+struct pool_handle : own::allocator_interface<pool_handle> {
     pool_state* pool = nullptr;
-    void* allocate(std::size_t size, std::size_t alignment) {
+    pool_handle() noexcept = default;
+    explicit pool_handle(pool_state* state) noexcept : pool(state) {}
+    void* do_allocate(std::size_t size, std::size_t alignment) {
         if (pool->fail_next) { pool->fail_next = false; return nullptr; }
         ++pool->live; ++pool->allocations;
         pool->last_size = size; pool->last_alignment = alignment;
         return ::operator new(size, std::align_val_t(alignment));
     }
-    void deallocate(void* pointer, std::size_t size, std::size_t alignment) noexcept {
+    void do_deallocate(void* pointer, std::size_t size, std::size_t alignment) noexcept {
         --pool->live; ++pool->deallocations;
         pool->last_size = size; pool->last_alignment = alignment;
         ::operator delete(pointer, std::align_val_t(alignment));
@@ -41,12 +43,12 @@ struct pool_handle {
 
 // Stateless allocator: no bytes in the owner.
 inline int global_live = 0;
-struct global_counter {
-    void* allocate(std::size_t size, std::size_t alignment) {
+struct global_counter : own::allocator_interface<global_counter> {
+    void* do_allocate(std::size_t size, std::size_t alignment) {
         ++global_live;
         return ::operator new(size, std::align_val_t(alignment));
     }
-    void deallocate(void* pointer, std::size_t, std::size_t alignment) noexcept {
+    void do_deallocate(void* pointer, std::size_t, std::size_t alignment) noexcept {
         --global_live;
         ::operator delete(pointer, std::align_val_t(alignment));
     }
@@ -92,9 +94,26 @@ static_assert(std::is_constructible_v<own::unique_owner<const int, pool_handle>,
 // The default and allocator_ref owners keep their conversions.
 static_assert(std::is_constructible_v<own::unique_owner<base>, own::unique_owner<derived>&&>);
 static_assert(std::is_constructible_v<own::unique_owner<base, own::allocator_ref>, own::unique_owner<derived, own::allocator_ref>&&>);
-// std::allocator is not a byte allocator.
-static_assert(!own::unique_allocator<std::allocator<int>>);
+// The concept requires the interface, not just matching member names.
+struct same_members_no_interface {
+    void* do_allocate(std::size_t size, std::size_t) { return ::operator new(size); }
+    void do_deallocate(void* p, std::size_t, std::size_t) noexcept { ::operator delete(p); }
+};
+struct interface_without_noexcept : own::allocator_interface<interface_without_noexcept> {
+    void* do_allocate(std::size_t size, std::size_t) { return ::operator new(size); }
+    void do_deallocate(void* p, std::size_t, std::size_t) { ::operator delete(p); }
+};
+struct names_another_type : own::allocator_interface<pool_handle> {
+    void* do_allocate(std::size_t size, std::size_t) { return ::operator new(size); }
+    void do_deallocate(void* p, std::size_t, std::size_t) noexcept { ::operator delete(p); }
+};
 static_assert(own::unique_allocator<pool_handle> && own::unique_allocator<global_counter>);
+static_assert(!own::unique_allocator<same_members_no_interface>);
+static_assert(!own::unique_allocator<interface_without_noexcept>);
+static_assert(!own::unique_allocator<names_another_type>);
+static_assert(!own::unique_allocator<std::allocator<int>>);
+// The interface adds no bytes: an allocator without data stays empty.
+static_assert(std::is_empty_v<global_counter> && sizeof(pool_handle) == sizeof(void*));
 
 void constructor_with_default_allocation() {
     int destroyed = 0;

@@ -118,9 +118,21 @@ so no argument list can be mistaken for adopting an existing object.
 
 ### User allocator types
 
-A type with `void* allocate(size_t size, size_t alignment)` and a `noexcept`
-`deallocate(void*, size_t size, size_t alignment)`, whose copies and moves are
-`noexcept`, satisfies `own::unique_allocator`. The owner stores the allocator
+An allocator implements the interface `own::allocator_interface<Self>` (CRTP):
+it derives from it publicly and defines `void* do_allocate(size_t size, size_t
+alignment)` and `void do_deallocate(void*, size_t size, size_t alignment)
+noexcept`. The interface supplies the public `allocate`, which turns a null
+result into `std::bad_alloc`, and `deallocate`, which forwards; owners call only
+these. The concept `own::unique_allocator` checks the whole contract at the point
+of use: the public base naming the allocator itself, both `do_` signatures
+including `noexcept`, and `noexcept` copy, move and destruction. Matching member
+names alone do not satisfy it: implementing the interface is the opt-in.
+
+The interface is static, not virtual. A virtual interface would add a vtable
+pointer to every allocator object, so a stateless allocator would no longer be
+empty and every owner using it would grow by a pointer; owners also never need
+to call an allocator whose type they do not know. Its special members are public
+and trivial so an allocator can still be an aggregate. The owner stores the allocator
 object with `[[no_unique_address]]` (`[[msvc::no_unique_address]]` on MSVC)
 before the pointer, so an empty allocator keeps the owner at one pointer and a
 handle-like allocator adds only its own size. Moves carry the allocator with the
