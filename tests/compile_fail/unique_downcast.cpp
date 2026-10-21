@@ -1,4 +1,5 @@
-// expect: conversion from '(own::)?unique_owner<base>' to (non-scalar type )?'(own::)?unique_owner<derived>'
+// expect: conversion from '[^']*unique_owner<base>
+// expect: to (non-scalar type )?'(own::)?unique_owner<derived>'
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

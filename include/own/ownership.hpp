@@ -153,11 +153,19 @@ namespace own
 
     namespace detail
     {
+#if defined(_MSC_VER)
+#pragma warning(push)
+// A [[noreturn]] OWN_FAIL_FAST hook makes the abort below unreachable (C4702).
+#pragma warning(disable : 4702)
+#endif
         [[noreturn]] OWN_NOINLINE inline void fail_fast(failure reason) noexcept
         {
             OWN_FAIL_FAST(reason);
             std::abort();
         }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
         inline void* default_allocate(void*, std::size_t bytes, std::size_t alignment)
         {
@@ -327,14 +335,18 @@ namespace own
         inline void add_strong(control_block* block) noexcept
         {
             const auto previous = strong_of(block->counts.fetch_add(strong_one, std::memory_order_relaxed));
-            if (previous == 0) [[unlikely]] { fail_fast(failure::use_after_release); }
-            if (previous >= saturation_limit) [[unlikely]] { fail_fast(failure::count_overflow); }
+            if (previous == 0 || previous >= saturation_limit) [[unlikely]]
+            {
+                fail_fast(previous == 0 ? failure::use_after_release : failure::count_overflow);
+            }
         }
         inline void add_weak(control_block* block) noexcept
         {
             const auto previous = weak_of(block->counts.fetch_add(weak_one, std::memory_order_relaxed));
-            if (previous == 0) [[unlikely]] { fail_fast(failure::use_after_release); }
-            if (previous >= saturation_limit) [[unlikely]] { fail_fast(failure::count_overflow); }
+            if (previous == 0 || previous >= saturation_limit) [[unlikely]]
+            {
+                fail_fast(previous == 0 ? failure::use_after_release : failure::count_overflow);
+            }
         }
 
         inline void release_weak(control_block* block) noexcept
