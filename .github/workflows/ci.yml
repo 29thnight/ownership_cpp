@@ -30,6 +30,38 @@ jobs:
           CXX: ${{ matrix.compiler }}
         run: ./scripts/test.sh ${{ matrix.mode }}
 
+  cmake:
+    name: cmake (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: msvc
+            os: windows-latest
+            configure: -G "Visual Studio 17 2022" -A x64
+          - name: clang-cl
+            os: windows-latest
+            configure: -G "Visual Studio 17 2022" -A x64 -T ClangCL
+          - name: gcc
+            os: ubuntu-24.04
+            configure: -G "Ninja Multi-Config" -DCMAKE_CXX_COMPILER=g++
+          - name: clang
+            os: ubuntu-24.04
+            configure: -G "Ninja Multi-Config" -DCMAKE_CXX_COMPILER=clang++
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build ${{ matrix.configure }}
+      - name: Build (Debug)
+        run: cmake --build build --config Debug --parallel
+      - name: Test (Debug)
+        run: ctest --test-dir build -C Debug --output-on-failure --parallel 4
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+      - name: Test (Release)
+        run: ctest --test-dir build -C Release --output-on-failure --parallel 4
+
   benchmarks:
     name: benchmarks build and smoke run (${{ matrix.compiler }})
     runs-on: ubuntu-24.04
