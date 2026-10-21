@@ -46,10 +46,10 @@ Median ns per copy/drop (or lock/drop) pair, primary / repeat:
 | weak_lock_drop | 4 | 341.34 / 346.31 | 380.27 / 311.12 | 356.23 / 348.21, 408.03 / 363.60 |
 
 Full tables with min, p90 and cv for every thread count:
-[CAS primary](../benchmarks/results/scaling_cas_increment_primary/summary.csv),
-[CAS repeat](../benchmarks/results/scaling_cas_increment_repeat/summary.csv),
-[fetch_add primary](../benchmarks/results/scaling_fetch_add_increment_primary/summary.csv),
-[fetch_add repeat](../benchmarks/results/scaling_fetch_add_increment_repeat/summary.csv),
+[CAS primary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/scaling_cas_increment_primary/summary.csv),
+[CAS repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/scaling_cas_increment_repeat/summary.csv),
+[fetch_add primary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/scaling_fetch_add_increment_primary/summary.csv),
+[fetch_add repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/scaling_fetch_add_increment_repeat/summary.csv),
 each with `raw.csv`, `metadata.txt` and `console.txt`. Header hashes:
 CAS `3b2f0d5b…`, fetch_add `a0c50986…` (recorded in each `metadata.txt`).
 
@@ -70,7 +70,7 @@ change beyond run-to-run noise. The saved cost therefore comes from the retry lo
 itself: a failed compare/exchange has to fetch the line again before retrying,
 while a locked add always succeeds on the first ownership of the line.
 
-The [codegen record](../benchmarks/results/scaling_increment_codegen.txt) shows the
+The [codegen record](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/scaling_increment_codegen.txt) shows the
 two instruction sequences: the old copy loops on `lock cmpxchgq`, the new copy is
 one `lock xaddq` followed by a compare against the saturation bound.
 

@@ -47,10 +47,10 @@ borrow-loop differences; the ~24% result cannot be attributed to extra borrow se
 Longer batches alone did not remove this uncertainty. No alignment or object-
 padding experiment was run, and no unfavorable samples or cases were discarded.
 
-Compact evidence: [final candidate ratios](../benchmarks/results/unique_precision/final_candidate.csv),
-[all final A/A and owner rows](../benchmarks/results/unique_precision/candidate_summary.csv),
-[initial lean controls](../benchmarks/results/unique_precision/baseline_summary.csv),
-[metadata](../benchmarks/results/unique_precision/metadata.json), and
+Compact evidence: [final candidate ratios](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique_precision/final_candidate.csv),
+[all final A/A and owner rows](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique_precision/candidate_summary.csv),
+[initial lean controls](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique_precision/baseline_summary.csv),
+[metadata](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique_precision/metadata.json), and
 [reproduction source and runner](../benchmarks/precision/README.md).
 
 ## Ownership contracts
@@ -125,7 +125,7 @@ entire handle state to be observable. The old owner clears all five source field
 the standard erased deleter retains its moved-from metadata. Different state
 requirements and generated checks/stores matter, not just handle size.
 
-Conversely, the saved [code-generation check](../benchmarks/results/unique/codegen.txt)
+Conversely, the saved [code-generation check](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique/codegen.txt)
 shows that **unobserved roundtrip loops disappear entirely** for the actual old
 prototype, lean own and standard ownership. All four inspected functions reduce
 to two pointer/payload loads and return; the iteration argument is unused. This
@@ -221,12 +221,12 @@ within-round ratios, not ratios of aggregate medians. P10/P90/P95/P99 are linear
 interpolated quantiles of batch-average times, not per-operation latency tails or
 confidence intervals. With 51 samples, the upper quantiles are especially coarse.
 
-- [Raw samples](../benchmarks/results/unique/raw.csv)
-- [Per-process summaries and paired ratios](../benchmarks/results/unique/summary.csv)
-- [Layout, lifetime and checksum checks](../benchmarks/results/unique/checks.csv)
-- [Unobserved moves and borrow-loop assembly](../benchmarks/results/unique/codegen.txt)
-- [Minimal reproduction metadata and source hashes](../benchmarks/results/unique/metadata.txt)
-- [Artifact SHA256 hashes](../benchmarks/results/unique/SHA256SUMS)
+- [Raw samples](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique/raw.csv)
+- [Per-process summaries and paired ratios](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique/summary.csv)
+- [Layout, lifetime and checksum checks](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique/checks.csv)
+- [Unobserved moves and borrow-loop assembly](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique/codegen.txt)
+- [Minimal reproduction metadata and source hashes](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique/metadata.txt)
+- [Artifact SHA256 hashes](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/unique/SHA256SUMS)
 
 ## Historical workload runner
 

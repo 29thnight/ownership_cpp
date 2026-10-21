@@ -11,11 +11,15 @@ ownership, async handoff, and a scope whose source owner might reset. There is n
 privileged original/root owner: every remaining strong reference has the same
 lifetime authority.
 
-`local_view<T>` is a pointer-sized, trivially copyable borrowed view. It contains
+`borrowed<T>` is a pointer-sized, trivially copyable borrowed view. It contains
 only `T*`: no control-block pointer, count, allocation, weak observation, thread ID,
 or guard ownership. `owner.borrow()` and view copies do not update reference
 counts. A view does not expire automatically; its non-null state is not proof that
 an object remains alive. Its lifetime is the caller's responsibility.
+
+`borrowed<T>` was called `local_view<T>`. That name remains an exact alias, so
+existing code and overloads are unaffected, but "local" now names only the
+thread confinement of `local_owner`; a view has no thread affinity at all.
 
 If an owner already covers a synchronous function/loop, simply borrow from it.
 If that owner might reset, copy one shared owner into a scope pin and borrow from
@@ -23,8 +27,8 @@ the pin. Copying each view does not copy the pin. A callback/job whose lifetime 
 independent captures a shared owner, then borrows during execution.
 
 A const `shared_owner<T>&` behaves like a const pointer handle, not a pointer to a
-const payload: its borrowed type remains `local_view<T>`. Use `shared_owner<const T>`
-or convert a view to `local_view<const T>` when immutable access is required.
+const payload: its borrowed type remains `borrowed<T>`. Use `shared_owner<const T>`
+or convert a view to `borrowed<const T>` when immutable access is required.
 
 There is deliberately no automatic view-to-owner promotion. Views and owners have
 different contracts, so their timings must be compared with equivalent contracts:
@@ -39,6 +43,26 @@ remain usable for normal full-expression access. Always check weak lock success.
 C++ permits retaining returned references and explicit operator calls, so it does
 not offer a complete lifetime checker here. Even converting a borrowed view to a
 virtual base needs the pointed-to object alive during pointer adjustment.
+
+### Static lifetime analysis
+
+Under Clang the owners are annotated `[[gsl::Owner]]`, the view
+`[[gsl::Pointer]]`, and `borrow()` `[[clang::lifetimebound]]`. Clang's built-in
+analysis then reports, at no runtime cost, a view that provably outlives the
+owner it came from:
+
+```cpp
+own::borrowed<int> leak() {
+    auto owner = own::make_shared<int>(1);
+    return owner.borrow(); // -Wreturn-stack-address: 'owner' dies here
+}
+```
+
+The analysis is local and conservative: it catches returns and initializations
+from owners whose end of life is visible in the same function, not views stored
+in long-lived objects or captured by deferred work. It is a safety net for
+common mistakes, not a borrow checker. Other compilers ignore the annotations;
+the tests in `tests/compile_fail/lifetime_*.cpp` run only under Clang.
 
 A view itself has no thread-affinity check. Moving/copying it does not touch a
 local ownership group. Any cross-thread borrowed use requires an externally
@@ -248,6 +272,67 @@ the linker may select either inline body, so diagnostics are only guaranteed whe
 the whole program uses checks. The field costs 8 bytes per group in every build.
 There is no guarantee across unloadable/reloadable dynamic-library boundaries.
 
+### Thread identity across modules
+
+The default thread ID comes from an inline function's static counter and a
+`thread_local`. Each Windows DLL, and each ELF shared object built with hidden
+visibility, has its own copy of both. The same thread then receives a different
+ID in each module, and a `local_owner` created in one module and copied in
+another on the *same* thread aborts as if it had crossed threads. The test
+`tests/module_boundary` reproduces this as its control case.
+
+Defining `OWN_THREAD_ID_PROVIDER` routes every module to one exported function:
+
+```cpp
+// A wrapper header that every module includes instead of the library header:
+#define OWN_THREAD_ID_PROVIDER engine_own_thread_id
+#ifdef ENGINE_CORE_BUILD
+#define OWN_THREAD_ID_PROVIDER_API __declspec(dllexport)
+#else
+#define OWN_THREAD_ID_PROVIDER_API __declspec(dllimport)
+#endif
+#include <own/ownership.hpp>
+
+// Exactly one source file of the module that exports it:
+OWN_DEFINE_THREAD_ID_PROVIDER()
+```
+
+The defined provider is the same monotonic counter, now shared, so IDs still
+are never reused by a later thread. An engine with its own thread registry can
+define the function itself; it must be `noexcept`, callable on every thread,
+and return a nonzero value that no other thread ever receives. Do not use the
+operating system's thread ID: it is reused after a thread exits, which would
+hide destruction on a new thread after the original one ended. The provider is
+called only by checked `local_owner` operations, so release builds without
+checks never call it.
+
+### Reporting contract violations
+
+Every violation the library detects (a reference added after release, count
+overflow, thread misuse, double registration, an incomplete `allocator_ref`)
+calls `OWN_FAIL_FAST(reason)` with an `own::failure` value, then `std::abort()`.
+The default hook does nothing, so behavior is unchanged. An engine can route the
+reason to its crash reporter:
+
+```cpp
+#define OWN_FAIL_FAST(reason) ::engine::fatal_error(::own::to_string(reason))
+#include <own/ownership.hpp>
+```
+
+The hook may log, flush and terminate, but must not return normally or throw;
+abort follows regardless. It is a macro rather than a registered function
+pointer because a registered pointer would itself be a per-module global.
+
+### Configuration consistency
+
+`OWN_ENABLE_UNSAFE_GET_WARNING`, `OWN_THREAD_ID_PROVIDER` and `OWN_FAIL_FAST`
+must be the same in every translation unit. On MSVC and clang-cl the header
+emits `#pragma detect_mismatch` records for them, so a disagreement within one
+linked binary is a link error (LNK2038) rather than a silent ODR violation.
+`OWN_DEBUG_THREAD_CHECK` is deliberately excluded: it changes behavior only,
+never layout, and mixed builds are supported as described above. The record
+cannot see across separately linked DLLs; keep settings in one wrapper header.
+
 ## Ownership from this
 
 `enable_owner_from_this<T>` contains one weak registration and an empty marker
@@ -269,8 +354,9 @@ Methods return mutable or const results matching the receiver:
 
 - `shared_from_this()` locks the registered weak reference
 - `weak_from_this()` copies a weak observer
-- `borrow_from_this()` and `local_from_this()` return a non-owning view when the
-  registration currently has a nonzero strong count, otherwise an empty view
+- `borrow_from_this()` returns a non-owning view when the registration currently
+  has a nonzero strong count, otherwise an empty view. `local_from_this()` is a
+  deprecated synonym kept for compatibility
 
 The last operation performs one relaxed atomic strong-count load through the
 registered weak reference. It does not increment a count or pin the object;
@@ -371,6 +457,31 @@ built-in one-slot cache, resource pooling may help allocation-heavy localization
 but pools must preserve alignment, context lifetime, and cross-thread
 deallocation requirements.
 
+## Casts and identity
+
+`static_owner_cast<To>` and `dynamic_owner_cast<To>` mirror the standard pointer
+casts for `shared_owner` and `local_owner`. A copy cast adds a reference to the
+same control block (or local group); an rvalue cast transfers the source's
+reference. A failed dynamic cast returns an empty owner and leaves an rvalue
+source untouched, so the caller never loses ownership by asking. Const is never
+removed. There is no general aliasing constructor: the result always points at
+the same object, adjusted only by a language cast.
+
+Exclusive owners take only `dynamic_owner_cast`, from an rvalue. `unique_owner`
+deletes through its own type, so the target must have a virtual destructor (or
+be the same type); otherwise the cast does not compile. `allocated_unique_owner`
+keeps its concrete disposer and allocation, so any successful cast destroys
+correctly.
+
+Owners still have no `==`, ordering or hash. `own::identity(owner)` returns an
+`own::object_id`: a comparable, hashable key that cannot be dereferenced.
+Shared, weak and local handles are keyed by their control block, so every handle
+and every cast of one object compare equal, and a weak key does not change when
+the object expires. Exclusive owners are keyed by their allocation (for
+`unique_owner`, the most-derived object). A key is unique only while its block
+or allocation exists; afterwards the address can be reused, exactly as with
+`std::owner_less`.
+
 ## Validation scope
 
 Testing includes owner/view contract separation, this registration, ordinary and
@@ -381,3 +492,11 @@ what the execution environment permits. A passing stress suite is evidence, not
 a formal proof of a concurrent algorithm. Real engine validation should include
 its actual schedulers, thread migration/cancellation, allocators, shutdown ordering,
 resource reload patterns, GPU APIs, fence values, and platform toolchains.
+
+Each compile-fail case states the reason it must be rejected (`// expect:`
+patterns matched against the compiler's output), so a case cannot pass by
+failing for an unrelated reason. CI builds and runs the suite with GCC, Clang,
+MSVC and clang-cl through CMake/CTest; with `cl.exe`, whose wording differs,
+only rejection is checked for the standard-diagnostic cases. Layout claims are
+`static_assert`s in `tests/layout_tests.cpp` and therefore hold on every
+platform that builds the tests.

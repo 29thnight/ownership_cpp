@@ -68,10 +68,10 @@ Median ns per operation, primary / repeat:
 | scan_16k_objects | own_a64 | 7.82 / 8.06 | 1.335 / 1.278 |
 | scan_256k_objects | own_a64 | 11.74 / 11.87 | 10.38 / 9.79 |
 
-Full data: [previous primary](../benchmarks/results/layout_wide_header_primary/summary.csv),
-[previous repeat](../benchmarks/results/layout_wide_header_repeat/summary.csv),
-[compact primary](../benchmarks/results/layout_compact_header_primary/summary.csv),
-[compact repeat](../benchmarks/results/layout_compact_header_repeat/summary.csv),
+Full data: [previous primary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/layout_wide_header_primary/summary.csv),
+[previous repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/layout_wide_header_repeat/summary.csv),
+[compact primary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/layout_compact_header_primary/summary.csv),
+[compact repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/layout_compact_header_repeat/summary.csv),
 each with raw samples, sizes, metadata and hashes.
 
 ## Analysis
