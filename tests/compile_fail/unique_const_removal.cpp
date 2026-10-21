@@ -1,5 +1,5 @@
-// expect: conversion from '[^']*unique_owner<const int>
-// expect: to (non-scalar type )?'(own::)?unique_owner<int>'
+// expect: conversion from '[^']*unique_owner<const int(, ?(\(default\) )?(\[\.\.\.\]|(own::)?new_delete))?>
+// expect: to (non-scalar type )?'(own::)?unique_owner<int(, ?(\(default\) )?(\[\.\.\.\]|(own::)?new_delete))?>'
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

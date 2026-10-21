@@ -16,7 +16,7 @@ static_assert(sizeof(own::unique_owner<payload>) == word, "unique_owner is one p
 static_assert(sizeof(own::shared_owner<payload>) == 2 * word);
 static_assert(sizeof(own::weak_owner<payload>) == 2 * word);
 static_assert(sizeof(own::local_owner<payload>) == 2 * word);
-static_assert(sizeof(own::allocated_unique_owner<payload>) == 5 * word);
+static_assert(sizeof(own::unique_owner<payload, own::allocator_ref>) == 5 * word);
 static_assert(sizeof(own::object_id) == sizeof(std::uintptr_t));
 
 // Control blocks: one 64-bit count word and one ops pointer.
@@ -36,7 +36,7 @@ int main() {
     std::printf("PASS layout: view %zu, unique %zu, shared %zu, allocated_unique %zu, "
                 "make_shared block %zu, make_local block %zu bytes\n",
                 sizeof(own::borrowed<payload>), sizeof(own::unique_owner<payload>),
-                sizeof(own::shared_owner<payload>), sizeof(own::allocated_unique_owner<payload>),
+                sizeof(own::shared_owner<payload>), sizeof(own::unique_owner<payload, own::allocator_ref>),
                 sizeof(own::detail::in_place_control<payload>),
                 sizeof(own::detail::in_place_control<payload, true>));
     return 0;

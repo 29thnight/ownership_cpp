@@ -4,7 +4,7 @@ own::unique_owner<const int> transfer_unique_in_second_translation_unit(own::uni
     return value;
 }
 
-own::allocated_unique_owner<const int> transfer_allocated_unique_in_second_translation_unit(own::allocated_unique_owner<int> value) {
+own::unique_owner<const int, own::allocator_ref> transfer_allocated_unique_in_second_translation_unit(own::unique_owner<int, own::allocator_ref> value) {
     return value;
 }
 

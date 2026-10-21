@@ -4,4 +4,4 @@
 #include <memory>
 #include <utility>
 
-int main() { own::allocated_unique_owner<int[3]> owner; }
+int main() { own::unique_owner<int[3], own::allocator_ref> owner; }

@@ -117,8 +117,8 @@ static_assert(!std::is_constructible_v<own::shared_owner<int>, own::unique_owner
 static_assert(!std::is_constructible_v<own::local_owner<int>, own::unique_owner<int>>);
 static_assert(!std::is_constructible_v<own::weak_owner<int>, own::unique_owner<int>>);
 static_assert(!std::is_constructible_v<own::unique_owner<int>, own::local_view<int>>);
-static_assert(!std::is_constructible_v<own::unique_owner<int>, own::allocated_unique_owner<int>>);
-static_assert(!std::is_constructible_v<own::allocated_unique_owner<int>, own::unique_owner<int>>);
+static_assert(!std::is_constructible_v<own::unique_owner<int>, own::unique_owner<int, own::allocator_ref>>);
+static_assert(!std::is_constructible_v<own::unique_owner<int, own::allocator_ref>, own::unique_owner<int>>);
 static_assert(!has_get<own::unique_owner<int>> && !has_release<own::unique_owner<int>>);
 static_assert(!has_use_count<own::unique_owner<int>> && !has_raw_reset<own::unique_owner<int>>);
 static_assert(!has_rvalue_borrow<own::unique_owner<int>> && !has_rvalue_borrow<const own::unique_owner<int>>);

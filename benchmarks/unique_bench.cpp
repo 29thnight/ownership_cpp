@@ -111,7 +111,7 @@ struct own_unique {
 };
 #if OWN_BENCH_LEAN
 struct own_allocated {
-    using owner = own::allocated_unique_owner<resource>;
+    using owner = own::unique_owner<resource, own::allocator_ref>;
     using view = own::local_view<const resource>;
     static owner make(std::uint64_t id) { return own::allocate_unique<resource>({}, id); }
     static view borrow(const owner& value) noexcept { return value.borrow(); }

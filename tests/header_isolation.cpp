@@ -2,8 +2,8 @@
 
 struct permanently_incomplete;
 int uses_permanently_incomplete_allocated() {
-    own::allocated_unique_owner<permanently_incomplete> value;
-    auto moved = static_cast<own::allocated_unique_owner<permanently_incomplete>&&>(value);
+    own::unique_owner<permanently_incomplete, own::allocator_ref> value;
+    auto moved = static_cast<own::unique_owner<permanently_incomplete, own::allocator_ref>&&>(value);
     moved.reset();
     return value || moved ? 1 : 0;
 }
@@ -14,7 +14,7 @@ own::unique_owner<incomplete> declared_opaque_factory();
 void declared_opaque_consumer(own::unique_owner<incomplete>);
 static_assert(sizeof(own::unique_owner<incomplete>) == sizeof(incomplete*));
 struct incomplete_holder {
-    own::allocated_unique_owner<incomplete> unique;
+    own::unique_owner<incomplete, own::allocator_ref> unique;
     own::local_owner<incomplete> local;
     own::shared_owner<incomplete> shared;
     own::weak_owner<incomplete> weak;
@@ -24,7 +24,7 @@ struct incomplete_holder {
 // Form, operate on, and destroy empty handles before the pointee is complete.
 int uses_incomplete_type() {
     incomplete_holder value;
-    auto moved = static_cast<own::allocated_unique_owner<incomplete>&&>(value.unique);
+    auto moved = static_cast<own::unique_owner<incomplete, own::allocator_ref>&&>(value.unique);
     moved.reset();
     return value.unique || moved || value.local || value.shared || value.view || !value.weak.expired() ? 1 : 0;
 }
