@@ -28,7 +28,10 @@ jobs:
       - name: Run test suite
         env:
           CXX: ${{ matrix.compiler }}
-        run: ./scripts/test.sh ${{ matrix.mode }}
+        run: ./scripts/test.sh ${{ matrix.mode }} 2>&1 | tee test.log; exit "${PIPESTATUS[0]}"
+      - name: Annotate failures
+        if: failure()
+        run: ./scripts/ci_annotate.sh test.log "test (${{ matrix.compiler }}, ${{ matrix.mode }})"
 
   cmake:
     name: cmake (${{ matrix.name }})
@@ -37,30 +40,37 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The default Visual Studio generator follows the runner image's VS.
           - name: msvc
             os: windows-latest
-            configure: -G "Visual Studio 17 2022" -A x64
+            configure: -A x64
           - name: clang-cl
             os: windows-latest
-            configure: -G "Visual Studio 17 2022" -A x64 -T ClangCL
+            configure: -A x64 -T ClangCL
           - name: gcc
             os: ubuntu-24.04
             configure: -G "Ninja Multi-Config" -DCMAKE_CXX_COMPILER=g++
           - name: clang
             os: ubuntu-24.04
             configure: -G "Ninja Multi-Config" -DCMAKE_CXX_COMPILER=clang++
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S . -B build ${{ matrix.configure }}
+        run: cmake -S . -B build ${{ matrix.configure }} 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
       - name: Build (Debug)
-        run: cmake --build build --config Debug --parallel
+        run: cmake --build build --config Debug --parallel 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
       - name: Test (Debug)
-        run: ctest --test-dir build -C Debug --output-on-failure --parallel 4
+        run: ctest --test-dir build -C Debug --output-on-failure --parallel 4 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
       - name: Build (Release)
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
       - name: Test (Release)
-        run: ctest --test-dir build -C Release --output-on-failure --parallel 4
+        run: ctest --test-dir build -C Release --output-on-failure --parallel 4 2>&1 | tee ci.log; exit "${PIPESTATUS[0]}"
+      - name: Annotate failures
+        if: failure()
+        run: ./scripts/ci_annotate.sh ci.log "cmake (${{ matrix.name }})"
 
   benchmarks:
     name: benchmarks build and smoke run (${{ matrix.compiler }})

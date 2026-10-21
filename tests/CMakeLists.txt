@@ -42,8 +42,15 @@ own_test(allocated_unique_owner_tests)
 own_test(unique_default_allocation_tests)
 own_test(api_extensions_tests)
 own_test(layout_tests)
-# Death tests; they use POSIX fork and report SKIP elsewhere.
+# Death tests for the debug thread checks; they use POSIX fork and report SKIP
+# elsewhere. NDEBUG is undefined for this target so that Release builds still
+# exercise the checks, in optimized code.
 own_test(thread_confinement_tests DEFINES OWN_ENABLE_UNSAFE_GET_WARNING=0)
+if(MSVC)
+    target_compile_options(thread_confinement_tests PRIVATE /UNDEBUG)
+else()
+    target_compile_options(thread_confinement_tests PRIVATE -UNDEBUG)
+endif()
 
 # Raw-pointer escape: with the warning disabled the sources build and run.
 own_test(unsafe_get_contract DEFINES OWN_ENABLE_UNSAFE_GET_WARNING=0)
