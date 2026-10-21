@@ -344,7 +344,9 @@ OWN_DEFINE_THREAD_ID_PROVIDER()
 ## Build, test and reproduce
 
 ```sh
-# Any compiler CMake supports, including MSVC and clang-cl:
+# Any compiler CMake supports, including MSVC and clang-cl
+# (on Windows, from a Visual Studio developer prompt: the compile-fail
+# tests run cl.exe directly and need its INCLUDE/LIB environment):
 cmake -S . -B build
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure

@@ -216,6 +216,11 @@ run_mode() {
                 echo "FAIL compile rejection: $name unexpectedly compiled" >&2
                 return 1
             fi
+            if grep -Eq "fatal error: .*(No such file or directory|file not found)" "$output/$name.log"; then
+                echo "FAIL compile rejection: $name could not find a header; the compiler environment is broken" >&2
+                cat "$output/$name.log" >&2
+                return 1
+            fi
             local expectations=0 pattern
             while IFS= read -r pattern; do
                 expectations=$((expectations + 1))
