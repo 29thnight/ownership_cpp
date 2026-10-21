@@ -1,3 +1,4 @@
+// expect: (cannot convert '(own::)?allocated_unique_owner<int>' to 'int\*'|no viable conversion from '(own::)?allocated_unique_owner<int>' to 'int \*')
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

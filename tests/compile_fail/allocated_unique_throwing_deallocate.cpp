@@ -1,3 +1,5 @@
+// expect: (invalid conversion from|incompatible function pointer types)
+// expect: noexcept
 #include <own/ownership.hpp>
 #include <utility>
 

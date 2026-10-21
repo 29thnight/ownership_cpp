@@ -1,3 +1,5 @@
+// expect: static assert
+// expect: enable_owner_from_this\ must\ be\ a\ single\ public\ unambiguous\ base
 #include <own/ownership.hpp>
 struct self;
 struct left : own::enable_owner_from_this<self> {};

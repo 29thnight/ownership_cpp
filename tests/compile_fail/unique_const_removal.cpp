@@ -1,3 +1,4 @@
+// expect: conversion from '(own::)?unique_owner<const int>' to (non-scalar type )?'(own::)?unique_owner<int>'
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

@@ -1,3 +1,4 @@
+// expect: deleted.*\bunsafe_get\b
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

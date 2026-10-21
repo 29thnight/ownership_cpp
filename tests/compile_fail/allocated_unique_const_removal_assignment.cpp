@@ -1,3 +1,4 @@
+// expect: (no match for 'operator=' \(operand types are '(own::)?allocated_unique_owner<int>'|no viable overloaded '=')
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>
