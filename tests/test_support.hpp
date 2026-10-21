@@ -5,7 +5,24 @@
 #include <stdexcept>
 #include <string>
 
+#if defined(_WIN32)
+#include <crtdbg.h>
+#include <stdlib.h>
+#endif
+
 namespace test {
+#if defined(_WIN32)
+// An unexpected abort or CRT assertion must fail the test, not wait on a
+// dialog box that no one on a CI runner will close.
+inline const bool no_error_dialogs = [] {
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE | _CRTDBG_MODE_DEBUG);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE | _CRTDBG_MODE_DEBUG);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+    return true;
+}();
+#endif
 inline void check(bool condition, const char* expression, const char* file, int line) {
     if (!condition) {
         throw std::runtime_error(std::string(file) + ":" + std::to_string(line) +

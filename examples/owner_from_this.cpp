@@ -10,7 +10,7 @@ namespace
         node() { assert(!shared_from_this()); } // not registered until construction ends
         ~node() { assert(!shared_from_this()); } // never resurrect during destruction
         own::shared_owner<node> retain() { return shared_from_this(); }
-        own::local_view<const node> inspect() const { return local_from_this(); }
+        own::local_view<const node> inspect() const { return borrow_from_this(); }
     };
 }
 
@@ -27,6 +27,6 @@ int main()
     assert(observed.expired());
     node unmanaged;
     assert(!unmanaged.shared_from_this());
-    assert(!unmanaged.local_from_this());
+    assert(!unmanaged.borrow_from_this());
     std::puts("same-control ownership from this passed");
 }

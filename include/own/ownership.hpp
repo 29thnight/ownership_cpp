@@ -3,12 +3,21 @@
 
 // Copyright (c) 2026 29thnight. Licensed under the MIT License; see LICENSE.
 #include <atomic>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <new>
 #include <type_traits>
 #include <utility>
+
+// ---------------------------------------------------------------------------
+// Configuration. Every macro below must have the same value in every
+// translation unit of a program, except OWN_DEBUG_THREAD_CHECK (see README).
+// On MSVC and clang-cl, #pragma detect_mismatch turns a disagreement inside
+// one linked binary (an .exe or one .dll) into a link error.
+// ---------------------------------------------------------------------------
 
 #ifndef OWN_DEBUG_THREAD_CHECK
 #ifdef NDEBUG
@@ -28,6 +37,108 @@
 #define OWN_ENABLE_UNSAFE_GET_WARNING 1
 #endif
 
+// MSVC accepts and ignores the standard attribute; its own spelling has the
+// layout effect. Without it the compact control blocks grow by a padding step.
+#if defined(_MSC_VER) && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(msvc::no_unique_address)
+#define OWN_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#endif
+#endif
+#ifndef OWN_NO_UNIQUE_ADDRESS
+#define OWN_NO_UNIQUE_ADDRESS [[no_unique_address]]
+#endif
+
+// Clang's lifetime analysis (-Wdangling, -Wreturn-stack-address) uses these
+// to report a borrowed view that outlives the owner it came from, such as
+// `return local_owner.borrow();`. Other compilers ignore them.
+#if defined(__clang__)
+#define OWN_GSL_OWNER(T) [[gsl::Owner(T)]]
+#define OWN_GSL_POINTER(T) [[gsl::Pointer(T)]]
+#define OWN_LIFETIMEBOUND [[clang::lifetimebound]]
+#else
+#define OWN_GSL_OWNER(T)
+#define OWN_GSL_POINTER(T)
+#define OWN_LIFETIMEBOUND
+#endif
+
+// Thread identity for the debug thread checks of local_owner. By default each
+// binary keeps its own counter. A program whose local owners cross shared
+// library / DLL boundaries must give every module one provider, or the same
+// thread receives a different ID in each module and the check aborts falsely:
+//
+//   // every module, before including this header (e.g. in a wrapper header):
+//   #define OWN_THREAD_ID_PROVIDER engine_own_thread_id
+//   #define OWN_THREAD_ID_PROVIDER_API __declspec(dllimport) // dllexport in the defining module
+//   // exactly one source file of exactly one module:
+//   OWN_DEFINE_THREAD_ID_PROVIDER()
+//
+// The provider must be noexcept, callable on every thread, and return a value
+// that is nonzero and never given to another thread (zero disables checks).
+#ifndef OWN_THREAD_ID_PROVIDER_API
+#define OWN_THREAD_ID_PROVIDER_API
+#endif
+#ifdef OWN_THREAD_ID_PROVIDER
+extern "C" OWN_THREAD_ID_PROVIDER_API std::size_t OWN_THREAD_ID_PROVIDER() noexcept;
+#define OWN_DEFINE_THREAD_ID_PROVIDER()                                                             \
+    extern "C" OWN_THREAD_ID_PROVIDER_API std::size_t OWN_THREAD_ID_PROVIDER() noexcept             \
+    {                                                                                               \
+        return ::own::detail::monotonic_thread_id();                                                \
+    }
+#endif
+
+#define OWN_DETAIL_STRINGIFY_VALUE(value) #value
+#define OWN_DETAIL_STRINGIFY(value) OWN_DETAIL_STRINGIFY_VALUE(value)
+#if defined(_MSC_VER)
+#pragma detect_mismatch("own_enable_unsafe_get_warning", OWN_DETAIL_STRINGIFY(OWN_ENABLE_UNSAFE_GET_WARNING))
+#ifdef OWN_THREAD_ID_PROVIDER
+#pragma detect_mismatch("own_thread_id_provider", OWN_DETAIL_STRINGIFY(OWN_THREAD_ID_PROVIDER))
+#else
+#pragma detect_mismatch("own_thread_id_provider", "per-module")
+#endif
+#ifdef OWN_FAIL_FAST
+#pragma detect_mismatch("own_fail_fast", "custom")
+#else
+#pragma detect_mismatch("own_fail_fast", "abort")
+#endif
+#endif
+
+namespace own
+{
+    // Why a contract violation stopped the program. Passed to OWN_FAIL_FAST.
+    enum class failure : unsigned char
+    {
+        use_after_release,   // a reference was added to an object whose count was zero
+        count_overflow,      // more than 2^31 strong/weak references, or a local alias count overflow
+        thread_mismatch,     // a local_owner group was used off its originating thread (debug checks)
+        double_registration, // enable_owner_from_this was registered twice
+        invalid_allocator,   // an allocator_ref is missing an allocate or deallocate callback
+        thread_ids_exhausted // the default thread-ID counter wrapped
+    };
+
+    // Stable text for logs and crash reports.
+    constexpr const char* to_string(failure reason) noexcept
+    {
+        switch (reason)
+        {
+        case failure::use_after_release: return "own: reference added after release";
+        case failure::count_overflow: return "own: reference count overflow";
+        case failure::thread_mismatch: return "own: local_owner used off its originating thread";
+        case failure::double_registration: return "own: enable_owner_from_this registered twice";
+        case failure::invalid_allocator: return "own: allocator_ref without allocate/deallocate";
+        case failure::thread_ids_exhausted: return "own: thread IDs exhausted";
+        }
+        return "own: unknown failure";
+    }
+}
+
+// Called with an own::failure on every contract violation the library detects.
+// Define before inclusion to report to an engine crash handler; it may log and
+// terminate but must not return or throw (std::abort() follows it regardless).
+//   #define OWN_FAIL_FAST(reason) ::engine::fatal(::own::to_string(reason))
+#ifndef OWN_FAIL_FAST
+#define OWN_FAIL_FAST(reason) ((void)(reason))
+#endif
+
 namespace own
 {
     template<class T> class unique_owner;
@@ -35,14 +146,16 @@ namespace own
     template<class T> class local_owner;
     template<class T> class shared_owner;
     template<class T> class weak_owner;
-    template<class T> class local_view;
+    template<class T> class borrowed;
     template<class T> class enable_owner_from_this;
     class retirement_task;
+    class object_id;
 
     namespace detail
     {
-        [[noreturn]] inline void fail_fast() noexcept
+        [[noreturn]] OWN_NOINLINE inline void fail_fast(failure reason) noexcept
         {
+            OWN_FAIL_FAST(reason);
             std::abort();
         }
 
@@ -214,12 +327,14 @@ namespace own
         inline void add_strong(control_block* block) noexcept
         {
             const auto previous = strong_of(block->counts.fetch_add(strong_one, std::memory_order_relaxed));
-            if (previous == 0 || previous >= saturation_limit) [[unlikely]] { fail_fast(); }
+            if (previous == 0) [[unlikely]] { fail_fast(failure::use_after_release); }
+            if (previous >= saturation_limit) [[unlikely]] { fail_fast(failure::count_overflow); }
         }
         inline void add_weak(control_block* block) noexcept
         {
             const auto previous = weak_of(block->counts.fetch_add(weak_one, std::memory_order_relaxed));
-            if (previous == 0 || previous >= saturation_limit) [[unlikely]] { fail_fast(); }
+            if (previous == 0) [[unlikely]] { fail_fast(failure::use_after_release); }
+            if (previous >= saturation_limit) [[unlikely]] { fail_fast(failure::count_overflow); }
         }
 
         inline void release_weak(control_block* block) noexcept
@@ -283,7 +398,7 @@ namespace own
             auto value = block->counts.load(std::memory_order_relaxed);
             while (strong_of(value) != 0)
             {
-                if (strong_of(value) >= saturation_limit) { fail_fast(); }
+                if (strong_of(value) >= saturation_limit) { fail_fast(failure::count_overflow); }
                 if (block->counts.compare_exchange_weak(value, value + strong_one,
                         std::memory_order_acquire, std::memory_order_relaxed))
                 {
@@ -302,13 +417,16 @@ namespace own
             {
                 return default_allocate(allocator.context, size, alignment);
             }
-            if (!allocator.allocate || !allocator.deallocate) { fail_fast(); }
+            if (!allocator.allocate || !allocator.deallocate) { fail_fast(failure::invalid_allocator); }
             void* result = allocator.allocate(allocator.context, size, alignment);
             if (!result) { throw std::bad_alloc(); }
             return result;
         }
 
-        inline std::size_t current_thread_id() noexcept
+        // The default identity, and what OWN_DEFINE_THREAD_ID_PROVIDER exports.
+        // Its counter is an inline static, so each module that does not share
+        // one provider has its own: see OWN_THREAD_ID_PROVIDER.
+        inline std::size_t monotonic_thread_id() noexcept
         {
             // Unique monotonic IDs also catch destruction on a newly created
             // thread after the origin thread has exited (TLS addresses reuse).
@@ -319,7 +437,7 @@ namespace own
                 auto value = next.load(std::memory_order_relaxed);
                 for (;;)
                 {
-                    if (value == count_limit) { fail_fast(); }
+                    if (value == count_limit) { fail_fast(failure::thread_ids_exhausted); }
                     if (next.compare_exchange_weak(value, value + 1,
                             std::memory_order_relaxed, std::memory_order_relaxed))
                     {
@@ -328,6 +446,15 @@ namespace own
                 }
             }();
             return id;
+        }
+
+        inline std::size_t current_thread_id() noexcept
+        {
+#ifdef OWN_THREAD_ID_PROVIDER
+            return ::OWN_THREAD_ID_PROVIDER();
+#else
+            return monotonic_thread_id();
+#endif
         }
 
         struct local_group
@@ -364,13 +491,13 @@ namespace own
             void check_thread() const noexcept
             {
 #if OWN_DEBUG_THREAD_CHECK
-                if (thread_id != 0 && thread_id != current_thread_id()) { fail_fast(); }
+                if (thread_id != 0 && thread_id != current_thread_id()) { fail_fast(failure::thread_mismatch); }
 #endif
             }
             void add_reference() noexcept
             {
                 check_thread();
-                if (references >= count_limit - exclusive_bit) { fail_fast(); }
+                if (references >= count_limit - exclusive_bit) { fail_fast(failure::count_overflow); }
                 references += one_alias;
             }
             void release() noexcept
@@ -482,7 +609,7 @@ namespace own
         template<class T, bool Group = false>
         struct in_place_control final : control_block
         {
-            [[no_unique_address]] std::conditional_t<Group, group_slot, no_group_slot> group;
+            OWN_NO_UNIQUE_ADDRESS std::conditional_t<Group, group_slot, no_group_slot> group;
             alignas(T) unsigned char storage[sizeof(T)];
 
             template<class... Args>
@@ -515,7 +642,7 @@ namespace own
             void* context;
             deallocate_function deallocate;
             retirement_hook retirement;
-            [[no_unique_address]] std::conditional_t<Group, group_slot, no_group_slot> group;
+            OWN_NO_UNIQUE_ADDRESS std::conditional_t<Group, group_slot, no_group_slot> group;
             alignas(T) unsigned char storage[sizeof(T)];
 
             template<class... Args>
@@ -560,31 +687,31 @@ namespace own
     // Non-owning access only. Copying a view does not retain or inspect any
     // ownership record. The caller keeps an owner alive for every use.
     template<class T>
-    class local_view
+    class OWN_GSL_POINTER(T) borrowed
     {
         static_assert(std::is_object_v<T> && !std::is_array_v<T>);
     public:
         using element_type = T;
-        constexpr local_view() noexcept = default;
-        constexpr local_view(std::nullptr_t) noexcept {}
+        constexpr borrowed() noexcept = default;
+        constexpr borrowed(std::nullptr_t) noexcept {}
         template<class U> requires std::is_convertible_v<U*, T*>
-        constexpr local_view(const local_view<U>& other) noexcept : pointer_(other.pointer_) {}
+        constexpr borrowed(const borrowed<U>& other) noexcept : pointer_(other.pointer_) {}
 #if OWN_ENABLE_UNSAFE_GET_WARNING
         [[deprecated("Borrowed raw pointer: caller must preserve lifetime; do not delete or otherwise deallocate the returned pointer")]]
 #endif
         constexpr T* unsafe_get() const noexcept { return pointer_; }
         constexpr explicit operator bool() const noexcept { return pointer_ != nullptr; }
         // Null comparison only; owners/views are never compared with each other or ordered.
-        friend constexpr bool operator==(const local_view& handle, std::nullptr_t) noexcept { return !handle; }
+        friend constexpr bool operator==(const borrowed& handle, std::nullptr_t) noexcept { return !handle; }
         constexpr T& operator*() const noexcept { return *pointer_; }
         constexpr T* operator->() const noexcept { return pointer_; }
         constexpr void reset() noexcept { pointer_ = nullptr; }
-        constexpr void swap(local_view& other) noexcept { std::swap(pointer_, other.pointer_); }
+        constexpr void swap(borrowed& other) noexcept { std::swap(pointer_, other.pointer_); }
 
     private:
         T* pointer_ = nullptr;
-        explicit constexpr local_view(T* pointer) noexcept : pointer_(pointer) {}
-        template<class> friend class local_view;
+        explicit constexpr borrowed(T* pointer) noexcept : pointer_(pointer) {}
+        template<class> friend class borrowed;
         template<class> friend class unique_owner;
         template<class> friend class allocated_unique_owner;
         template<class> friend class shared_owner;
@@ -592,10 +719,14 @@ namespace own
         template<class> friend class enable_owner_from_this;
     };
 
+    // The earlier name of borrowed<T>. An exact alias, so existing code and
+    // overloads keep working; "local" now names only thread confinement.
+    template<class T> using local_view = borrowed<T>;
+
     // Default exclusive ownership is just one pointer. Typed new/delete supply
     // destruction and allocation lookup without runtime allocator metadata.
     template<class T>
-    class unique_owner
+    class OWN_GSL_OWNER(T) unique_owner
     {
         static_assert(std::is_object_v<T> && !std::is_array_v<T>);
     public:
@@ -632,8 +763,8 @@ namespace own
 #endif
         T* unsafe_get() const & noexcept { return pointer_; }
         T* unsafe_get() const && = delete;
-        [[nodiscard]] local_view<T> borrow() const & noexcept { return local_view<T>(pointer_); }
-        local_view<T> borrow() const && = delete;
+        [[nodiscard]] borrowed<T> borrow() const & noexcept OWN_LIFETIMEBOUND { return borrowed<T>(pointer_); }
+        borrowed<T> borrow() const && = delete;
         explicit operator bool() const noexcept { return pointer_ != nullptr; }
         // Null comparison only; owners/views are never compared with each other or ordered.
         friend bool operator==(const unique_owner& handle, std::nullptr_t) noexcept { return !handle; }
@@ -656,7 +787,7 @@ namespace own
     // Explicit allocator-aware ownership. Erased allocator/destruction state
     // lives in this opt-in handle, never in the pointer-only default owner.
     template<class T>
-    class allocated_unique_owner
+    class OWN_GSL_OWNER(T) allocated_unique_owner
     {
         static_assert(std::is_object_v<T> && !std::is_array_v<T>);
     public:
@@ -716,8 +847,8 @@ namespace own
 #endif
         T* unsafe_get() const & noexcept { return pointer_; }
         T* unsafe_get() const && = delete;
-        [[nodiscard]] local_view<T> borrow() const & noexcept { return local_view<T>(pointer_); }
-        local_view<T> borrow() const && = delete;
+        [[nodiscard]] borrowed<T> borrow() const & noexcept OWN_LIFETIMEBOUND { return borrowed<T>(pointer_); }
+        borrowed<T> borrow() const && = delete;
         explicit operator bool() const noexcept { return pointer_ != nullptr; }
         // Null comparison only; owners/views are never compared with each other or ordered.
         friend bool operator==(const allocated_unique_owner& handle, std::nullptr_t) noexcept { return !handle; }
@@ -782,7 +913,7 @@ namespace own
     };
 
     template<class T>
-    class shared_owner
+    class OWN_GSL_OWNER(T) shared_owner
     {
         static_assert(std::is_object_v<T> && !std::is_array_v<T>);
     public:
@@ -861,8 +992,8 @@ namespace own
 #endif
         T* unsafe_get() const & noexcept { return pointer_; }
         T* unsafe_get() const && = delete;
-        [[nodiscard]] local_view<T> borrow() const & noexcept { return local_view<T>(pointer_); }
-        local_view<T> borrow() const && = delete;
+        [[nodiscard]] borrowed<T> borrow() const & noexcept OWN_LIFETIMEBOUND { return borrowed<T>(pointer_); }
+        borrowed<T> borrow() const && = delete;
         explicit operator bool() const noexcept { return pointer_ != nullptr; }
         // Null comparison only; owners/views are never compared with each other or ordered.
         friend bool operator==(const shared_owner& handle, std::nullptr_t) noexcept { return !handle; }
@@ -901,7 +1032,7 @@ namespace own
     };
 
     template<class T>
-    class local_owner
+    class OWN_GSL_OWNER(T) local_owner
     {
         static_assert(std::is_object_v<T> && !std::is_array_v<T>);
     public:
@@ -968,12 +1099,12 @@ namespace own
 #endif
         T* unsafe_get() const & noexcept { check_thread(); return pointer_; }
         T* unsafe_get() const && = delete;
-        [[nodiscard]] local_view<T> borrow() const & noexcept
+        [[nodiscard]] borrowed<T> borrow() const & noexcept OWN_LIFETIMEBOUND
         {
             check_thread();
-            return local_view<T>(pointer_);
+            return borrowed<T>(pointer_);
         }
-        local_view<T> borrow() const && = delete;
+        borrowed<T> borrow() const && = delete;
         explicit operator bool() const noexcept { check_thread(); return pointer_ != nullptr; }
         // Null comparison only; owners/views are never compared with each other or ordered. Uses the same thread check as operator bool.
         friend bool operator==(const local_owner& handle, std::nullptr_t) noexcept { return !handle; }
@@ -1068,9 +1199,17 @@ namespace own
         }
         template<class U> requires std::is_convertible_v<U*, T*>
         weak_owner(weak_owner<U>&& other) noexcept
-            : weak_owner(static_cast<const weak_owner<U>&>(other))
+            : block_(std::exchange(other.block_, nullptr))
         {
-            other.reset();
+            // Takes over the source's weak reference instead of adding one
+            // and releasing the other. The pointer is adjusted only while a
+            // temporary strong reference proves the object is alive.
+            U* const source = std::exchange(other.pointer_, nullptr);
+            if (block_ && detail::try_add_strong(block_))
+            {
+                pointer_ = source;
+                detail::release_strong(block_);
+            }
         }
         template<class U> requires std::is_convertible_v<U*, T*>
         weak_owner(const shared_owner<U>& other) noexcept
@@ -1150,6 +1289,7 @@ namespace own
         T* pointer_ = nullptr;
         template<class> friend class weak_owner;
         template<class> friend class enable_owner_from_this;
+        friend struct detail::owner_access;
     };
 
     // Registration is factory-only. This weak reference never owns the object.
@@ -1164,20 +1304,24 @@ namespace own
         [[nodiscard]] shared_owner<const T> shared_from_this() const noexcept { return weak_.lock(); }
         [[nodiscard]] weak_owner<T> weak_from_this() noexcept { return weak_; }
         [[nodiscard]] weak_owner<const T> weak_from_this() const noexcept { return weak_; }
-        [[nodiscard]] local_view<T> borrow_from_this() & noexcept
+        [[nodiscard]] borrowed<T> borrow_from_this() & noexcept
         {
-            return weak_.expired() ? local_view<T>() : local_view<T>(weak_.pointer_);
+            return weak_.expired() ? borrowed<T>() : borrowed<T>(weak_.pointer_);
         }
-        [[nodiscard]] local_view<const T> borrow_from_this() const & noexcept
+        [[nodiscard]] borrowed<const T> borrow_from_this() const & noexcept
         {
-            return weak_.expired() ? local_view<const T>() : local_view<const T>(weak_.pointer_);
+            return weak_.expired() ? borrowed<const T>() : borrowed<const T>(weak_.pointer_);
         }
-        local_view<T> borrow_from_this() && = delete;
-        local_view<const T> borrow_from_this() const && = delete;
-        [[nodiscard]] local_view<T> local_from_this() & noexcept { return borrow_from_this(); }
-        [[nodiscard]] local_view<const T> local_from_this() const & noexcept { return borrow_from_this(); }
-        local_view<T> local_from_this() && = delete;
-        local_view<const T> local_from_this() const && = delete;
+        borrowed<T> borrow_from_this() && = delete;
+        borrowed<const T> borrow_from_this() const && = delete;
+        // Synonyms kept for compatibility. "local" names thread confinement
+        // (local_owner); these return an unchecked view, so prefer borrow_from_this().
+        [[deprecated("use borrow_from_this(); local_from_this() returns the same borrowed view")]]
+        [[nodiscard]] borrowed<T> local_from_this() & noexcept { return borrow_from_this(); }
+        [[deprecated("use borrow_from_this(); local_from_this() returns the same borrowed view")]]
+        [[nodiscard]] borrowed<const T> local_from_this() const & noexcept { return borrow_from_this(); }
+        borrowed<T> local_from_this() && = delete;
+        borrowed<const T> local_from_this() const && = delete;
 
     protected:
         constexpr enable_owner_from_this() noexcept = default;
@@ -1199,7 +1343,7 @@ namespace own
         {
             static_assert(std::is_convertible_v<std::remove_cv_t<U>*, T*>,
                           "enable_owner_from_this must name a public unambiguous object base");
-            if (weak_.block_) { detail::fail_fast(); }
+            if (weak_.block_) { detail::fail_fast(failure::double_registration); }
             // Const factories bind the same registration; their const member
             // accessors expose only const ownership/views, as expected.
             weak_.pointer_ = const_cast<std::remove_cv_t<U>*>(object);
@@ -1257,6 +1401,111 @@ namespace own
                 }
                 return local_owner<T>(group, block->pointer());
             }
+
+            // ---- Casts. A failed cast returns empty and leaves the source as it was.
+            template<class To, class From, class Cast>
+            static shared_owner<To> cast_shared(const shared_owner<From>& source, Cast cast) noexcept
+            {
+                if (!source.bits_) { return {}; }
+                To* const pointer = cast(source.pointer_);
+                if (!pointer) { return {}; }
+                add_strong(source.block());
+                return shared_owner<To>(source.block(), pointer); // a copy: no fresh hint
+            }
+            template<class To, class From, class Cast>
+            static shared_owner<To> cast_shared(shared_owner<From>&& source, Cast cast) noexcept
+            {
+                if (!source.bits_) { return {}; }
+                To* const pointer = cast(source.pointer_);
+                if (!pointer) { return {}; }
+                shared_owner<To> result;
+                result.bits_ = std::exchange(source.bits_, 0); // keeps the fresh hint, as a move does
+                result.pointer_ = pointer;
+                source.pointer_ = nullptr;
+                return result;
+            }
+            template<class To, class From, class Cast>
+            static local_owner<To> cast_local(const local_owner<From>& source, Cast cast) noexcept
+            {
+                source.check_thread();
+                if (!source.group_) { return {}; }
+                To* const pointer = cast(source.pointer_);
+                if (!pointer) { return {}; }
+                source.group_->add_reference();
+                return local_owner<To>(source.group_, pointer);
+            }
+            template<class To, class From, class Cast>
+            static local_owner<To> cast_local(local_owner<From>&& source, Cast cast) noexcept
+            {
+                source.check_thread();
+                if (!source.group_) { return {}; }
+                To* const pointer = cast(source.pointer_);
+                if (!pointer) { return {}; }
+                source.pointer_ = nullptr;
+                return local_owner<To>(std::exchange(source.group_, nullptr), pointer);
+            }
+            template<class To, class From>
+            static unique_owner<To> cast_unique(unique_owner<From>&& source) noexcept
+            {
+                To* const pointer = source.pointer_ ? dynamic_cast<To*>(source.pointer_) : nullptr;
+                if (!pointer) { return {}; }
+                source.pointer_ = nullptr;
+                return unique_owner<To>(pointer);
+            }
+            template<class To, class From>
+            static allocated_unique_owner<To> cast_allocated_unique(allocated_unique_owner<From>&& source) noexcept
+            {
+                To* const pointer = source.pointer_ ? dynamic_cast<To*>(source.pointer_) : nullptr;
+                if (!pointer) { return {}; }
+                // Storage, allocator and the concrete disposer stay with the object.
+                allocated_unique_owner<To> result;
+                result.pointer_ = pointer;
+                result.storage_ = source.storage_;
+                result.context_ = source.context_;
+                result.deallocate_ = source.deallocate_;
+                result.dispose_ = source.dispose_;
+                source.pointer_ = nullptr;
+                return result;
+            }
+
+            // ---- Identity.
+            static std::uintptr_t address(const volatile void* pointer) noexcept
+            {
+                return reinterpret_cast<std::uintptr_t>(pointer);
+            }
+            template<class T>
+            static const volatile void* complete_object(T* pointer) noexcept
+            {
+                if constexpr (std::is_polymorphic_v<T>) { return dynamic_cast<const volatile void*>(pointer); }
+                else { return pointer; }
+            }
+            template<class T>
+            static std::uintptr_t identity_of(const shared_owner<T>& owner) noexcept
+            {
+                return address(owner.block());
+            }
+            template<class T>
+            static std::uintptr_t identity_of(const weak_owner<T>& owner) noexcept
+            {
+                return address(owner.block_);
+            }
+            template<class T>
+            static std::uintptr_t identity_of(const local_owner<T>& owner) noexcept
+            {
+                owner.check_thread();
+                return owner.group_ ? address(owner.group_->block) : 0;
+            }
+            template<class T>
+            static std::uintptr_t identity_of(const unique_owner<T>& owner) noexcept
+            {
+                return owner.pointer_ ? address(complete_object(owner.pointer_)) : 0;
+            }
+            template<class T>
+            static std::uintptr_t identity_of(const allocated_unique_owner<T>& owner) noexcept
+            {
+                return owner.pointer_ ? address(owner.storage_) : 0;
+            }
+            static object_id make_id(std::uintptr_t value) noexcept;
         };
     }
 
@@ -1380,12 +1629,162 @@ namespace own
             detail::create_block<T, block_type>({}, std::forward<Args>(args)...));
     }
 
+    // ---------------------------------------------------------------------
+    // Owner casts. Like the std pointer casts, but a failed dynamic cast
+    // returns an empty owner and leaves an rvalue source untouched, so the
+    // caller still owns the object. Const qualification is never removed.
+    // ---------------------------------------------------------------------
+
+    template<class To, class From>
+        requires requires(From* pointer) { static_cast<To*>(pointer); }
+    [[nodiscard]] shared_owner<To> static_owner_cast(const shared_owner<From>& source) noexcept
+    {
+        return detail::owner_access::cast_shared<To>(source, [](From* p) noexcept { return static_cast<To*>(p); });
+    }
+    template<class To, class From>
+        requires requires(From* pointer) { static_cast<To*>(pointer); }
+    [[nodiscard]] shared_owner<To> static_owner_cast(shared_owner<From>&& source) noexcept
+    {
+        return detail::owner_access::cast_shared<To>(std::move(source), [](From* p) noexcept { return static_cast<To*>(p); });
+    }
+    template<class To, class From>
+        requires std::is_polymorphic_v<From> && requires(From* pointer) { dynamic_cast<To*>(pointer); }
+    [[nodiscard]] shared_owner<To> dynamic_owner_cast(const shared_owner<From>& source) noexcept
+    {
+        return detail::owner_access::cast_shared<To>(source, [](From* p) noexcept { return dynamic_cast<To*>(p); });
+    }
+    template<class To, class From>
+        requires std::is_polymorphic_v<From> && requires(From* pointer) { dynamic_cast<To*>(pointer); }
+    [[nodiscard]] shared_owner<To> dynamic_owner_cast(shared_owner<From>&& source) noexcept
+    {
+        return detail::owner_access::cast_shared<To>(std::move(source), [](From* p) noexcept { return dynamic_cast<To*>(p); });
+    }
+
+    template<class To, class From>
+        requires requires(From* pointer) { static_cast<To*>(pointer); }
+    [[nodiscard]] local_owner<To> static_owner_cast(const local_owner<From>& source) noexcept
+    {
+        return detail::owner_access::cast_local<To>(source, [](From* p) noexcept { return static_cast<To*>(p); });
+    }
+    template<class To, class From>
+        requires requires(From* pointer) { static_cast<To*>(pointer); }
+    [[nodiscard]] local_owner<To> static_owner_cast(local_owner<From>&& source) noexcept
+    {
+        return detail::owner_access::cast_local<To>(std::move(source), [](From* p) noexcept { return static_cast<To*>(p); });
+    }
+    template<class To, class From>
+        requires std::is_polymorphic_v<From> && requires(From* pointer) { dynamic_cast<To*>(pointer); }
+    [[nodiscard]] local_owner<To> dynamic_owner_cast(const local_owner<From>& source) noexcept
+    {
+        return detail::owner_access::cast_local<To>(source, [](From* p) noexcept { return dynamic_cast<To*>(p); });
+    }
+    template<class To, class From>
+        requires std::is_polymorphic_v<From> && requires(From* pointer) { dynamic_cast<To*>(pointer); }
+    [[nodiscard]] local_owner<To> dynamic_owner_cast(local_owner<From>&& source) noexcept
+    {
+        return detail::owner_access::cast_local<To>(std::move(source), [](From* p) noexcept { return dynamic_cast<To*>(p); });
+    }
+
+    // Exclusive owners: checked downcasts only, from an rvalue. unique_owner
+    // deletes through the result type, so that type must have a virtual
+    // destructor (or be the source type itself). allocated_unique_owner keeps
+    // its concrete disposer, so any successful cast is safe to destroy.
+    template<class To, class From>
+        requires std::is_polymorphic_v<From> && requires(From* pointer) { dynamic_cast<To*>(pointer); } &&
+                 (std::is_same_v<std::remove_cv_t<To>, std::remove_cv_t<From>> ||
+                  (std::has_virtual_destructor_v<To> && std::is_nothrow_destructible_v<To>))
+    [[nodiscard]] unique_owner<To> dynamic_owner_cast(unique_owner<From>&& source) noexcept
+    {
+        return detail::owner_access::cast_unique<To>(std::move(source));
+    }
+    template<class To, class From>
+        requires std::is_polymorphic_v<From> && requires(From* pointer) { dynamic_cast<To*>(pointer); }
+    [[nodiscard]] allocated_unique_owner<To> dynamic_owner_cast(allocated_unique_owner<From>&& source) noexcept
+    {
+        return detail::owner_access::cast_allocated_unique<To>(std::move(source));
+    }
+
+    // ---------------------------------------------------------------------
+    // Identity. Owners still have no ==, < or hash of their own; identity()
+    // gives an opaque key that does not expose a dereferenceable pointer.
+    //  - shared_owner, weak_owner and local_owner: the managed object's control
+    //    block, so every strong, weak and local handle of one object and every
+    //    cast of it compare equal, and a weak key stays valid after expiry.
+    //  - unique_owner, allocated_unique_owner: the owned allocation.
+    // A key is unique among objects whose control block (or allocation) is
+    // still alive; afterwards the address, and so the key, may be reused.
+    // Empty handles give the null key.
+    // ---------------------------------------------------------------------
+    class object_id
+    {
+    public:
+        constexpr object_id() noexcept = default;
+        constexpr explicit operator bool() const noexcept { return value_ != 0; }
+        friend constexpr bool operator==(const object_id&, const object_id&) noexcept = default;
+        friend constexpr std::strong_ordering operator<=>(const object_id&, const object_id&) noexcept = default;
+        std::size_t hash() const noexcept
+        {
+            // Addresses share their low bits; mix before bucketing.
+            std::uint64_t x = static_cast<std::uint64_t>(value_);
+            x ^= x >> 33;
+            x *= 0xff51afd7ed558ccdull;
+            x ^= x >> 33;
+            return static_cast<std::size_t>(x);
+        }
+
+    private:
+        std::uintptr_t value_ = 0;
+        friend struct detail::owner_access;
+    };
+
+    inline object_id detail::owner_access::make_id(std::uintptr_t value) noexcept
+    {
+        object_id id;
+        id.value_ = value;
+        return id;
+    }
+
+    template<class T>
+    [[nodiscard]] object_id identity(const shared_owner<T>& owner) noexcept
+    {
+        return detail::owner_access::make_id(detail::owner_access::identity_of(owner));
+    }
+    template<class T>
+    [[nodiscard]] object_id identity(const weak_owner<T>& owner) noexcept
+    {
+        return detail::owner_access::make_id(detail::owner_access::identity_of(owner));
+    }
+    template<class T>
+    [[nodiscard]] object_id identity(const local_owner<T>& owner) noexcept
+    {
+        return detail::owner_access::make_id(detail::owner_access::identity_of(owner));
+    }
+    template<class T>
+    [[nodiscard]] object_id identity(const unique_owner<T>& owner) noexcept
+    {
+        return detail::owner_access::make_id(detail::owner_access::identity_of(owner));
+    }
+    template<class T>
+    [[nodiscard]] object_id identity(const allocated_unique_owner<T>& owner) noexcept
+    {
+        return detail::owner_access::make_id(detail::owner_access::identity_of(owner));
+    }
+
     template<class T> void swap(unique_owner<T>& a, unique_owner<T>& b) noexcept { a.swap(b); }
     template<class T> void swap(allocated_unique_owner<T>& a, allocated_unique_owner<T>& b) noexcept { a.swap(b); }
-    template<class T> void swap(local_view<T>& a, local_view<T>& b) noexcept { a.swap(b); }
+    template<class T> void swap(borrowed<T>& a, borrowed<T>& b) noexcept { a.swap(b); }
     template<class T> void swap(shared_owner<T>& a, shared_owner<T>& b) noexcept { a.swap(b); }
     template<class T> void swap(local_owner<T>& a, local_owner<T>& b) noexcept { a.swap(b); }
     template<class T> void swap(weak_owner<T>& a, weak_owner<T>& b) noexcept { a.swap(b); }
+}
+
+namespace std
+{
+    template<>
+    struct hash<own::object_id>
+    {
+        std::size_t operator()(const own::object_id& id) const noexcept { return id.hash(); }
+    };
 }
 
 #endif
