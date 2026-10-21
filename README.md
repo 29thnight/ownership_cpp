@@ -130,17 +130,31 @@ ordinary standard unique ownership.
 `unique_owner<T, Alloc>` takes the allocator as its second template argument and
 the allocator object as its first constructor argument:
 
+An allocator implements `own::allocator_interface`, naming itself:
+
 ```cpp
-struct frame_pool_ref                        // any type with these two members
+struct frame_pool_ref : own::allocator_interface<frame_pool_ref>
 {
-    frame_pool* pool;
-    void* allocate(std::size_t size, std::size_t alignment) { return pool->allocate(size, alignment); }
-    void deallocate(void* p, std::size_t size, std::size_t alignment) noexcept { pool->free(p, size, alignment); }
+    frame_pool* pool = nullptr;
+    frame_pool_ref() noexcept = default;
+    explicit frame_pool_ref(frame_pool& p) noexcept : pool(&p) {}
+
+    void* do_allocate(std::size_t size, std::size_t alignment) { return pool->allocate(size, alignment); }
+    void do_deallocate(void* p, std::size_t size, std::size_t alignment) noexcept { pool->free(p, size, alignment); }
 };
 
-own::unique_owner<mesh, frame_pool_ref> mesh_owner(frame_pool_ref{&pool}, vertices);
-auto same_thing = own::allocate_unique<mesh>(frame_pool_ref{&pool}, vertices);
+own::unique_owner<mesh, frame_pool_ref> mesh_owner(frame_pool_ref{pool}, vertices);
+auto same_thing = own::allocate_unique<mesh>(frame_pool_ref{pool}, vertices);
 ```
+
+The owner calls only the interface's `allocate`/`deallocate`, which forward to
+`do_allocate`/`do_deallocate` (the same split as `std::pmr::memory_resource`).
+The concept `own::unique_allocator` checks the contract where the owner is
+named: a public `allocator_interface<Alloc>` base, the two `do_` members with
+those exact signatures (`do_deallocate` `noexcept`), and `noexcept` copies. A
+type with the right members but without the interface is rejected. The interface
+is static rather than virtual, so it adds no vtable pointer: an allocator with no
+data stays empty and its owner one pointer.
 
 | Second argument | Size (64-bit) | Constructed with | Base conversion |
 | --- | ---: | --- | --- |
@@ -152,11 +166,10 @@ auto same_thing = own::allocate_unique<mesh>(frame_pool_ref{&pool}, vertices);
 - The owner keeps a copy of the allocator, moves it with the object, and on
   release passes back exactly `sizeof(T)`/`alignof(T)`. That is also why a user
   allocator's owner converts only to `const T`: through a base it would report
-  the wrong size. `allocate` may return null (reported as `std::bad_alloc`) or
-  throw; a throwing constructor's storage goes back to the same allocator
-- `allocate` and `deallocate` are a concept, `own::unique_allocator`, not
-  `std::allocator`; the allocator's copies must be `noexcept`, and `deallocate`
-  must be `noexcept` and work on whichever thread releases the owner
+  the wrong size. `do_allocate` may return null (reported as `std::bad_alloc`)
+  or throw; a throwing constructor's storage goes back to the same allocator
+- `do_deallocate` must work on whichever thread releases the owner;
+  `std::allocator` and other standard allocators do not implement the interface
 - Owners with different allocators are different types, like containers with
   different allocators, and never convert into one another. A function that
   accepts owners from any pool can take `unique_owner<T, own::allocator_ref>`
