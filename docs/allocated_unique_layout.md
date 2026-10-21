@@ -52,8 +52,8 @@ Median ns per operation, primary / repeat:
 | Allocator request (32 B payload) | 32 B | 56 B |
 | glibc chunk | 48 B | 64 B |
 
-Data: [primary](../benchmarks/results/allocated_unique_layout_primary/summary.csv),
-[repeat](../benchmarks/results/allocated_unique_layout_repeat/summary.csv).
+Data: [primary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/allocated_unique_layout_primary/summary.csv),
+[repeat](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/allocated_unique_layout_repeat/summary.csv).
 
 ## Analysis
 

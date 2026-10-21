@@ -4,3 +4,6 @@ core
 core.*
 
 /benchmarks/.build/
+
+# Benchmark output. Published runs live on the bench-data branch.
+/benchmarks/results/

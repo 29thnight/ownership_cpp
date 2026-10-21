@@ -29,9 +29,9 @@ Requires a C++20 compiler with standard threads/barriers. The script used GCC 14
 
 Override `CXX`, `BENCH_CXXFLAGS` or `BENCH_OUTPUT` if needed. `-march=native` makes the produced binary host-specific. Do not use sanitizer runs for performance conclusions. `NDEBUG` disables the library's local-thread diagnostics, as expected for its release build.
 
-Primary data: [summary](../benchmarks/results/20261007_primary/summary.csv), [every timed sample](../benchmarks/results/20261007_primary/raw.csv), [machine/compiler/source metadata](../benchmarks/results/20261007_primary/metadata.txt), [run settings](../benchmarks/results/20261007_primary/run.txt)
+Primary data: [summary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_primary/summary.csv), [every timed sample](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_primary/raw.csv), [machine/compiler/source metadata](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_primary/metadata.txt), [run settings](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_primary/run.txt)
 
-Independent process repeat: [summary](../benchmarks/results/20261007_repeat/summary.csv), [every timed sample](../benchmarks/results/20261007_repeat/raw.csv), [metadata](../benchmarks/results/20261007_repeat/metadata.txt)
+Independent process repeat: [summary](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_repeat/summary.csv), [every timed sample](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_repeat/raw.csv), [metadata](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_repeat/metadata.txt)
 
 Both runs use the same header and benchmark SHA-256 hashes:
 
@@ -89,7 +89,7 @@ All values below are **nanoseconds per stated unit**. The primary p95/p99 and re
 
 ## Allocation and space overhead
 
-[Allocation counts](../benchmarks/results/20261007_primary/allocations.csv) are measured through equivalent custom allocation callbacks, separately from timings. The standard counting allocator is stateless so instrumentation does not add an allocator pointer to the standard control block. These are **requested bytes**, not allocator size classes, RSS or peak resident memory. Common vector/deque storage is excluded from this ownership-allocation report. All tracked allocations were matched by frees.
+[Allocation counts](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_primary/allocations.csv) are measured through equivalent custom allocation callbacks, separately from timings. The standard counting allocator is stateless so instrumentation does not add an allocator pointer to the standard control block. These are **requested bytes**, not allocator size classes, RSS or peak resident memory. Common vector/deque storage is excluded from this ownership-allocation report. All tracked allocations were matched by frees.
 
 | Scenario | std allocations / bytes | own allocations / bytes |
 |---|---:|---:|
@@ -102,7 +102,7 @@ The payload is 88 bytes. Own's observed coallocated control overhead is 72 bytes
 
 ## Engine-like lifetime validation and boundaries
 
-The [untimed validation trace](../benchmarks/results/20261007_primary/lifetime_validation.txt) verifies both implementations:
+The [untimed validation trace](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/20261007_primary/lifetime_validation.txt) verifies both implementations:
 
 1. Registry publishes version 2 while existing scene attachments still reference version 1
 2. A global frame lease keeps version 1 alive after scene release
@@ -118,4 +118,4 @@ No renderer, asset I/O, ECS, actual GPU, graphics API fence, real resource recla
 
 ## Verification
 
-The final benchmark source also passed an ASan+UBSan smoke (3 rounds, 1 warmup, 1,000 iterations) with debug thread checks enabled. See [its metadata](../benchmarks/results/sanitizer_validation/metadata.txt) and [status](../benchmarks/results/sanitizer_validation/status.txt). `ASAN_OPTIONS=detect_leaks=0` was necessary: an earlier LeakSanitizer run failed because the execution environment uses ptrace. **LeakSanitizer leak detection is unverified**; the explicit allocation and destructor checks are not a substitute for it. Sanitizer timings are not performance evidence.
+The final benchmark source also passed an ASan+UBSan smoke (3 rounds, 1 warmup, 1,000 iterations) with debug thread checks enabled. See [its metadata](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/sanitizer_validation/metadata.txt) and [status](https://github.com/29thnight/ownership_cpp/blob/bench-data/benchmarks/results/sanitizer_validation/status.txt). `ASAN_OPTIONS=detect_leaks=0` was necessary: an earlier LeakSanitizer run failed because the execution environment uses ptrace. **LeakSanitizer leak detection is unverified**; the explicit allocation and destructor checks are not a substitute for it. Sanitizer timings are not performance evidence.
