@@ -2,6 +2,10 @@
 # Self-contained GCC/Clang C++20 test runner; no downloaded test framework.
 set -euo pipefail
 
+# Compiler diagnostics in plain ASCII: under a UTF-8 locale GCC quotes names
+# with typographic quotes, which the compile-fail expectations do not use.
+export LC_ALL=C
+
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cxx=${CXX:-g++}
 build_root=${OWN_TEST_BUILD_DIR:-"$root/build/tests"}

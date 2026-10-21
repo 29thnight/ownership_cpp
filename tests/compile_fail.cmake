@@ -43,6 +43,9 @@ foreach(line IN LISTS directives)
 endforeach()
 
 file(MAKE_DIRECTORY "${OUTPUT_DIR}")
+# ASCII diagnostics: under a UTF-8 locale GCC uses typographic quotes.
+set(ENV{LC_ALL} C)
+set(ENV{LANG} C)
 if(FRONTEND STREQUAL "MSVC")
     set(arguments /nologo /c /std:c++20 /EHsc /permissive- /W4 /WX /wd4189 /wd4100
         "/I${INCLUDE}" /DOWN_ENABLE_UNSAFE_GET_WARNING=0 "/Fo${OUTPUT_DIR}/${name}.obj")
