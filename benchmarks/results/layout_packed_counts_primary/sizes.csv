@@ -1,3 +1,0 @@
-type,requested_bytes,malloc_chunk_bytes
-own_block,24,32
-std_block,24,32
