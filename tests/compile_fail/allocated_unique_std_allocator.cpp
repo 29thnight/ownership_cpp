@@ -1,3 +1,4 @@
+// expect: no matching function for call to '?allocate_unique
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

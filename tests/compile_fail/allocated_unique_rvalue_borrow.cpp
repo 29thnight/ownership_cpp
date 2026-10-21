@@ -1,3 +1,4 @@
+// expect: deleted.*\bborrow\b
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>

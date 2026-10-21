@@ -1,3 +1,4 @@
+// expect: conversion from '(own::)?unique_owner<derived>' to (non-scalar type )?'(own::)?unique_owner<base>'
 #include <own/ownership.hpp>
 #include <utility>
 

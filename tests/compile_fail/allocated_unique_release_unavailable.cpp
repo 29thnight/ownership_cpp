@@ -1,3 +1,4 @@
+// expect: (no member named 'release'|'release' is not a member)
 #include <own/ownership.hpp>
 #include <memory>
 #include <utility>
