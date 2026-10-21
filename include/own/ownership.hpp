@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <functional>
+#include <typeindex> // declares std::hash for the object_id specialization; <functional> costs 3x the parse time
 #include <new>
 #include <type_traits>
 #include <utility>
@@ -182,15 +182,30 @@ namespace own
             return ::operator new(bytes);
         }
 
-        inline void default_deallocate(void*, void* pointer, std::size_t,
+        // Every caller passes the exact size it allocated, so the sized forms
+        // apply: size-class allocators (mimalloc, jemalloc, tcmalloc, engine
+        // allocators replacing global new) then skip looking the size up. A
+        // library or allocator without sized support forwards to the unsized form.
+        // (Clang before 19 leaves sized deallocation off unless asked with
+        // -fsized-deallocation; the unsized forms are used there.)
+        inline void default_deallocate(void*, void* pointer, [[maybe_unused]] std::size_t bytes,
                                        std::size_t alignment) noexcept
         {
+#if defined(__cpp_sized_deallocation)
+            if (alignment > alignof(std::max_align_t))
+            {
+                ::operator delete(pointer, bytes, std::align_val_t(alignment));
+                return;
+            }
+            ::operator delete(pointer, bytes);
+#else
             if (alignment > alignof(std::max_align_t))
             {
                 ::operator delete(pointer, std::align_val_t(alignment));
                 return;
             }
             ::operator delete(pointer);
+#endif
         }
 
         template<class From, class To, class Alloc = new_delete>
@@ -229,6 +244,17 @@ namespace own
             static_cast<T*>(storage)->~T();
             deallocate(context, storage, sizeof(T), alignof(T));
         }
+
+        // True when converting From* to To* never reads the object: the same
+        // class, or a non-virtual base (a fixed offset). A downcast static_cast
+        // is well-formed exactly when the base is accessible, unambiguous and
+        // not virtual. Only a virtual-base conversion reads the object, which
+        // [basic.life] forbids once its lifetime has ended; a non-virtual one
+        // is valid while the storage exists, as it does under a weak reference.
+        template<class From, class To>
+        inline constexpr bool fixed_offset_conversion =
+            std::is_same_v<std::remove_cv_t<From>, std::remove_cv_t<To>> ||
+            requires(std::remove_cv_t<To>* base) { static_cast<std::remove_cv_t<From>*>(base); };
 
         struct owner_registration_marker {};
         struct control_block;
@@ -1369,10 +1395,15 @@ namespace own
             if (block_)
             {
                 detail::add_weak(block_);
+                if constexpr (detail::fixed_offset_conversion<U, T>)
+                {
+                    // A fixed offset reads nothing: no strong reference needed.
+                    pointer_ = other.pointer_;
+                }
                 // Derived-to-virtual-base adjustment can read the object.
                 // Never adjust an expired pointer, even though its storage
                 // remains allocated for the weak control block.
-                if (detail::try_add_strong(block_))
+                else if (detail::try_add_strong(block_))
                 {
                     pointer_ = other.pointer_;
                     detail::release_strong(block_);
@@ -1392,7 +1423,11 @@ namespace own
             // and releasing the other. The pointer is adjusted only while a
             // temporary strong reference proves the object is alive.
             U* const source = std::exchange(other.pointer_, nullptr);
-            if (block_ && detail::try_add_strong(block_))
+            if constexpr (detail::fixed_offset_conversion<U, T>)
+            {
+                pointer_ = source;
+            }
+            else if (block_ && detail::try_add_strong(block_))
             {
                 pointer_ = source;
                 detail::release_strong(block_);

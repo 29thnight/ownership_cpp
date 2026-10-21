@@ -231,6 +231,35 @@ void weak_converting_move() {
     CHECK(allocator.live == 0 && allocator.deallocations == 1);
 }
 
+struct virtual_base { virtual ~virtual_base() noexcept = default; int value = 5; };
+struct virtual_derived : virtual virtual_base { int extra = 6; };
+
+void weak_conversion_paths() {
+    // Non-virtual base: a fixed offset, converted without a strong reference.
+    int destroyed = 0;
+    auto owner = own::make_shared<derived>(destroyed);
+    own::weak_owner<derived> source = owner;
+    own::weak_owner<other_base> live(source); // non-zero offset
+    CHECK(live.lock()->other_value == 2);
+    CHECK(owner.use_count() == 1); // the conversion took no lasting strong reference
+    owner.reset();
+    CHECK(destroyed == 1);
+    own::weak_owner<other_base> after_expiry(source);
+    own::weak_owner<other_base> moved_after_expiry(std::move(source));
+    CHECK(after_expiry.expired() && !after_expiry.lock() && !moved_after_expiry.lock());
+    CHECK(own::identity(after_expiry) == own::identity(moved_after_expiry));
+
+    // Virtual base: reading the object is required, so only a live one converts.
+    auto virtual_owner = own::make_shared<virtual_derived>();
+    own::weak_owner<virtual_derived> virtual_source = virtual_owner;
+    own::weak_owner<virtual_base> virtual_live(virtual_source);
+    CHECK(virtual_live.lock()->value == 5);
+    CHECK(virtual_owner.use_count() == 1);
+    virtual_owner.reset();
+    own::weak_owner<virtual_base> virtual_expired(virtual_source);
+    CHECK(virtual_expired.expired() && !virtual_expired.lock());
+}
+
 void borrowed_is_the_view_type() {
     auto owner = own::make_shared<int>(4);
     own::borrowed<const int> view = owner.borrow();
@@ -251,6 +280,7 @@ int main() {
     test::run("exclusive identity", exclusive_identity);
     test::run("identity as container key", identity_as_container_key);
     test::run("weak converting move", weak_converting_move);
+    test::run("weak conversion paths", weak_conversion_paths);
     test::run("borrowed is the view type", borrowed_is_the_view_type);
     return test::finish();
 }
